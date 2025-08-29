@@ -1,0 +1,15 @@
+# Python-specific files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+/venv/
+.venv/
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+pip-selfcheck.json
+user_data
