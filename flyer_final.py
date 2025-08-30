@@ -46,7 +46,6 @@ class WhatsAppAutomation:
             chrome_options.add_argument("--disable-features=VizDisplayCompositor")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-images")  # Faster loading
-            chrome_options.add_argument("--disable-javascript")  # Only for non-essential JS
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -60,7 +59,7 @@ class WhatsAppAutomation:
             # Execute scripts to hide automation
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            self.wait = WebDriverWait(self.driver, 20)  # Reduced timeout for faster operation
+            self.wait = WebDriverWait(self.driver, 20)  # Wait for up to 20 seconds
             return True
             
         except Exception as e:
@@ -116,9 +115,7 @@ class WhatsAppAutomation:
             url = f"https://web.whatsapp.com/send?phone={phone_number}"
             self.driver.get(url)
             
-            # Reduced wait time for faster processing
-            time.sleep(1.5)
-            
+            # Use WebDriverWait to confirm chat is open, which is more robust than a fixed sleep
             message_input_selectors = [
                 "//div[@contenteditable='true'][@data-tab='10']",
                 "//div[@title='Type a message']",
@@ -161,8 +158,8 @@ class WhatsAppAutomation:
             
             search_box.clear()
             search_box.send_keys(contact_name_or_number)
-            time.sleep(1)  # Reduced wait
             
+            # Dynamic wait for search results
             result_selectors = [
                 f"//span[@title='{contact_name_or_number}']",
                 f"//span[contains(text(), '{contact_name_or_number}')]",
@@ -175,7 +172,6 @@ class WhatsAppAutomation:
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     chat_result.click()
-                    time.sleep(1)
                     return True
                 except (TimeoutException, NoSuchElementException):
                     continue
@@ -187,7 +183,7 @@ class WhatsAppAutomation:
             return False
         
     def send_message(self, message):
-        """Send a text message with improved speed."""
+        """Send a text message with improved delivery confirmation."""
         try:
             message_selectors = [
                 "//div[@contenteditable='true'][@data-tab='10']",
@@ -198,7 +194,7 @@ class WhatsAppAutomation:
             message_box = None
             for selector in message_selectors:
                 try:
-                    message_box = WebDriverWait(self.driver, 5).until(
+                    message_box = WebDriverWait(self.driver, 10).until(
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     break
@@ -206,10 +202,37 @@ class WhatsAppAutomation:
                     continue
             
             if not message_box:
+                print("Could not find message input box")
                 return False
+            
+            # Clear any existing text and type the new message
+            message_box.clear()
+            message_box.click()  # Ensure focus
+            time.sleep(0.3)  # Small delay to ensure focus
             
             message_box.send_keys(message)
             message_box.send_keys(Keys.ENTER)
+            
+            # Wait for message to be sent by checking for delivery indicators
+            try:
+                # Wait for the message to appear in chat (usually takes 1-3 seconds)
+                WebDriverWait(self.driver, 10).until(
+                    lambda driver: driver.execute_script(
+                        "return document.querySelector('[data-testid=\"msg-container\"]') !== null"
+                    )
+                )
+                
+                # Additional wait to ensure message is fully processed
+                time.sleep(2)
+                
+                # Verify message input is ready for next message
+                WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, message_selectors[0]))
+                )
+                
+            except TimeoutException:
+                print("Warning: Could not confirm message delivery")
+                time.sleep(3)  # Fallback wait time
             
             print(f"Message sent: {message[:50]}...")
             return True
@@ -259,45 +282,16 @@ class WhatsAppAutomation:
                 
                 # Click the message box to focus it
                 message_box.click()
-                time.sleep(0.5)
+                time.sleep(0.5) # Small sleep to ensure focus
                 
                 # Paste the image using Ctrl+V
                 message_box.send_keys(Keys.CONTROL, 'v')
-                time.sleep(3)  # Wait for image to be processed and preview to appear
                 
-                # Add caption if provided
-                caption_box = None
-                if caption:
-                    try:
-                        # The caption box appears after pasting image
-                        caption_selectors = [
-                            "//div[contains(@aria-placeholder, 'Add a caption')]",
-                            "//div[@contenteditable='true' and @role='textbox']",
-                            "//div[contains(@data-tab, 'caption')]",
-                            "//div[contains(@class, 'selectable-text')][@contenteditable='true'][not(@data-tab='10')]"
-                        ]
-                        
-                        for selector in caption_selectors:
-                            try:
-                                caption_box = self.wait.until(
-                                    EC.element_to_be_clickable((By.XPATH, selector))
-                                )
-                                caption_box.clear()
-                                caption_box.send_keys(caption)
-                                print("Caption added.")
-                                break
-                            except TimeoutException:
-                                continue
-                    except Exception as e:
-                        print(f"Could not add caption: {e}")
-                
-                time.sleep(1)
-                
-                # Look for the actual send button in the image preview interface
+                # --- START OF CRITICAL IMPROVEMENT FOR SPEED ---
                 send_button_found = False
                 send_selectors = [
                     "//span[@data-testid='send']",
-                    "//button[@data-testid='send']", 
+                    "//button[@data-testid='send']",
                     "//div[@role='button'][@aria-label='Send']",
                     "//span[@data-icon='send']",
                     "//div[contains(@class, 'send')][@role='button']",
@@ -305,11 +299,24 @@ class WhatsAppAutomation:
                     "//span[contains(@class, 'send')][@role='button']"
                 ]
 
+                # Wait for the send button to be clickable inside the image preview
                 for selector in send_selectors:
                     try:
-                        send_button = self.wait.until(
+                        send_button = WebDriverWait(self.driver, 10).until(
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
+                        # Add caption if provided AFTER the preview appears
+                        if caption:
+                            try:
+                                caption_box = WebDriverWait(self.driver, 2).until(
+                                    EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
+                                )
+                                caption_box.clear()
+                                caption_box.send_keys(caption)
+                                print("Caption added.")
+                            except (TimeoutException, NoSuchElementException):
+                                print("Could not find caption box.")
+                        
                         send_button.click()
                         print("Send button clicked")
                         send_button_found = True
@@ -317,23 +324,24 @@ class WhatsAppAutomation:
                     except TimeoutException:
                         continue
 
-                # If send button not found, use Enter key method on the caption box or message box
                 if not send_button_found:
-                    print("Send button not found, using Enter key method")
-                    try:
-                        # Use caption box if available, otherwise fall back to message box
-                        target_box = caption_box if caption_box else message_box
-                        if target_box:
-                            target_box.send_keys(Keys.ENTER)
-                            print("Enter pressed to send image.")
-                            send_button_found = True
-                    except Exception as e:
-                        print(f"Enter key method failed: {e}")
-                        return False
+                    print("Send button not found. Attempting to use Enter key.")
+                    # Fallback to pressing Enter on the message box if a send button wasn't found
+                    target_box = caption_box if caption and 'caption_box' in locals() else message_box
+                    if target_box:
+                        target_box.send_keys(Keys.ENTER)
+                        send_button_found = True
                 
-                time.sleep(3)  # Wait for image to be sent
-                print("Image sent successfully using copy-paste method")
-                return True
+                if send_button_found:
+                    # Final dynamic wait to confirm message is sent
+                    # The message input box should become clickable again.
+                    WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, message_input_selectors[0])))
+                    print("Image sent successfully using copy-paste method")
+                    return True
+                else:
+                    print("Failed to send image.")
+                    return False
+                # --- END OF CRITICAL IMPROVEMENT FOR SPEED ---
                 
             except Exception as e:
                 print(f"Copy-paste method failed: {e}")
@@ -365,13 +373,16 @@ class WhatsAppAutomation:
                 
                 return True
             else:
+                # Use a command-line tool for Linux/macOS
                 import subprocess
                 try:
-                    subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', image_path], 
-                                 check=True, capture_output=True)
+                    # Try xclip for Linux
+                    subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', image_path],  
+                                   check=True, capture_output=True)
                     return True
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     try:
+                        # Try pbcopy for macOS
                         with open(image_path, 'rb') as f:
                             subprocess.run(['pbcopy'], input=f.read(), check=True)
                         return True
@@ -380,7 +391,7 @@ class WhatsAppAutomation:
         except Exception as e:
             print(f"Error copying image to clipboard: {e}")
             return False
-        
+            
     def _send_image_attachment_method(self, image_path, caption=""):
         """Fallback attachment method with reduced timeouts."""
         try:
@@ -403,8 +414,6 @@ class WhatsAppAutomation:
             if not attachment_button:
                 return False
                 
-            time.sleep(0.5)
-            
             photo_video_selectors = [
                 "//span[contains(text(), 'Photos & Videos')]",
                 "//div[@title='Photos & Videos']",
@@ -420,13 +429,12 @@ class WhatsAppAutomation:
                 except (TimeoutException, NoSuchElementException):
                     continue
             
-            time.sleep(0.5)
-            
             file_input_selectors = [
                 "//input[@accept='image/*,video/mp4,video/3gpp,video/quicktime']",
                 "//input[@type='file'][contains(@accept, 'image')]",
             ]
 
+            file_input = None
             for selector in file_input_selectors:
                 try:
                     file_input = WebDriverWait(self.driver, 3).until(
@@ -440,17 +448,16 @@ class WhatsAppAutomation:
                 return False
                 
             file_input.send_keys(os.path.abspath(image_path))
-            time.sleep(1.5)
-
-            # Add caption if provided
-            if caption:
-                try:
-                    caption_box = WebDriverWait(self.driver, 2).until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
-                    )
+            
+            # Use dynamic wait instead of fixed sleep
+            try:
+                caption_box = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
+                )
+                if caption:
                     caption_box.send_keys(caption)
-                except (TimeoutException, NoSuchElementException):
-                    pass
+            except (TimeoutException, NoSuchElementException):
+                print("Could not find caption box.")
 
             # Send button
             send_selectors = [
@@ -468,7 +475,15 @@ class WhatsAppAutomation:
                 except (TimeoutException, NoSuchElementException):
                     continue
 
-            time.sleep(1)
+            # Final check to see if the message input box is available again
+            message_input_selectors = [
+                "//div[@contenteditable='true'][@data-tab='10']",
+                "//div[@title='Type a message']",
+                "//div[@role='textbox'][@title='Type a message']",
+            ]
+            WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, message_input_selectors[0])))
+
+            print("Image sent successfully using attachment method")
             return True
             
         except Exception as e:
@@ -505,6 +520,7 @@ class ModernFlyerGeneratorApp:
         self.bg_image_path = ctk.StringVar()
         self.data_path = ctk.StringVar()
         self.output_dir = ctk.StringVar()
+        
         self.font_size = ctk.StringVar(value="36")
         self.text_color = ctk.StringVar(value="#000000")
         self.selected_font = ctk.StringVar()
@@ -523,11 +539,10 @@ class ModernFlyerGeneratorApp:
         self.text_shadow = ctk.BooleanVar(value=False)
         self.shadow_color = ctk.StringVar(value="#808080")
         
-        # Coordinate variables (now with input fields)
-        self.name_x = ctk.StringVar(value="164")
-        self.name_y = ctk.StringVar(value="1437")
-        self.phone_x = ctk.StringVar(value="161")
-        self.phone_y = ctk.StringVar(value="1509")
+        self.name_x = ctk.StringVar(value="500")
+        self.name_y = ctk.StringVar(value="1900")
+        self.phone_x = ctk.StringVar(value="490")
+        self.phone_y = ctk.StringVar(value="1970")
         
         # WhatsApp automation
         self.whatsapp_automation = WhatsAppAutomation()
@@ -576,7 +591,7 @@ class ModernFlyerGeneratorApp:
         )
         if file_path:
             self.bg_image_path.set(file_path)
-            self._set_smart_default_positions()
+            self._update_preview()
     
     def _load_data_file(self):
         """Opens a file dialog to select a data file (CSV or XLSX)."""
@@ -621,16 +636,54 @@ class ModernFlyerGeneratorApp:
         self._update_preview()
     
     def _update_preview(self):
-        """Updates the preview image on the canvas."""
+        """
+        Updates the preview image on the canvas by drawing a full preview
+        image in memory using PIL and then displaying it.
+        """
         if not self.bg_image_path.get() or not os.path.exists(self.bg_image_path.get()):
+            self.status_label.configure(text="Please select a background image.", text_color="orange")
             return
-        
-        if self.preview_canvas.winfo_width() <= 1:
-            self.root.after(50, self._update_preview)
-            return
-        
-        self._draw_flyer(self.preview_canvas, "Aditya Kumar", "+91 98765 43210", preview_mode=True)
 
+        try:
+            # Create a temporary image with the preview data, just like the final flyer
+            preview_image = self._draw_flyer("Coreprix", "+91 90000 XXXXX")
+            if not preview_image:
+                self.status_label.configure(text="Failed to generate preview image.", text_color="red")
+                return
+
+            canvas_width = self.preview_canvas.winfo_width()
+            canvas_height = self.preview_canvas.winfo_height()
+
+            if canvas_width <= 1 or canvas_height <= 1:
+                self.root.after(50, self._update_preview)
+                return
+
+            img_width, img_height = preview_image.size
+            self.scale_factor = min(canvas_width / img_width, canvas_height / img_height)
+            new_width = int(img_width * self.scale_factor)
+            new_height = int(img_height * self.scale_factor)
+            
+            # Resize the pre-rendered Pillow image to fit the canvas
+            resized_preview_image = preview_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Convert to a format Tkinter can display
+            self.preview_image_tk = ImageTk.PhotoImage(resized_preview_image)
+            
+            # Clear the old canvas contents and display the new image
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_image(
+                canvas_width // 2, 
+                canvas_height // 2, 
+                anchor="center", 
+                image=self.preview_image_tk
+            )
+            
+            self.status_label.configure(text="Preview updated successfully", text_color="gray")
+            
+        except Exception as e:
+            messagebox.showerror("Preview Error", f"An error occurred while updating preview: {e}")
+            self.status_label.configure(text="Error updating preview", text_color="red")
+    
     def _get_text_bounds(self, text, font):
         """Calculate the actual bounds of the text for proper positioning."""
         try:
@@ -641,46 +694,62 @@ class ModernFlyerGeneratorApp:
             height = bbox[3] - bbox[1]
             return width, height
         except:
+            # Fallback for font errors
             return len(text) * int(self.font_size.get()) * 0.6, int(self.font_size.get())
 
-    def _set_smart_default_positions(self):
-        """Sets intelligent default text positions."""
-        if not self.bg_image_path.get() or not os.path.exists(self.bg_image_path.get()):
-            return
-        
-        try:
-            bg_image = Image.open(self.bg_image_path.get())
-            img_width, img_height = bg_image.size
-            
-            # Smart positioning based on image dimensions
-            name_x = max(50, int(img_width * 0.08))
-            name_y = max(int(img_height * 0.75), img_height - 120)
-            
-            phone_x = name_x
-            phone_y = min(name_y + 60, img_height - 50)
-            
-            self.name_x.set(str(name_x))
-            self.name_y.set(str(name_y))
-            self.phone_x.set(str(phone_x))
-            self.phone_y.set(str(phone_y))
-            
-            self.root.after(100, self._update_preview)
-            
-        except Exception as e:
-            print(f"Error setting smart default positions: {e}")
-    
     def _apply_text_effects(self, draw, text, position, font, color):
-        """Apply text effects like shadow, bold, etc."""
+        """Apply text effects like shadow, bold, underline, etc."""
         x, y = position
         
         # Apply shadow effect
         if self.text_shadow.get():
-            shadow_offset = max(1, int(self.font_size.get()) // 20)
+            shadow_offset = max(2, int(self.font_size.get()) // 15)
             draw.text((x + shadow_offset, y + shadow_offset), text, 
-                     fill=self.shadow_color.get(), font=font)
+                      fill=self.shadow_color.get(), font=font)
+        
+        # Simulate bold by drawing text multiple times with slight offsets
+        if self.text_bold.get():
+            for dx in range(1, 3):
+                for dy in range(1, 3):
+                    draw.text((x + dx, y + dy), text, fill=color, font=font)
         
         # Draw main text
         draw.text((x, y), text, fill=color, font=font)
+        
+        # Apply underline effect
+        if self.text_underline.get():
+            try:
+                bbox = draw.textbbox((x, y), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                underline_y = y + text_height + 2
+                underline_thickness = max(1, int(self.font_size.get()) // 20)
+                
+                for i in range(underline_thickness):
+                    draw.line([(x, underline_y + i), (x + text_width, underline_y + i)], 
+                              fill=color, width=1)
+            except:
+                pass
+    
+    def _create_italic_font_image(self, text, font, color):
+        """Create an italicized version of text by skewing the image."""
+        try:
+            # Create temporary image for text
+            temp_img = Image.new('RGBA', (1000, 200), (0, 0, 0, 0))
+            temp_draw = ImageDraw.Draw(temp_img)
+            temp_draw.text((50, 50), text, fill=color, font=font)
+            
+            # Apply italic transformation (skew)
+            if self.text_italic.get():
+                from PIL import ImageTransform
+                skew_factor = 0.2
+                coeffs = (1, skew_factor, 0, 0, 1, 0)
+                temp_img = temp_img.transform(temp_img.size, ImageTransform.AFFINE, coeffs)
+            
+            return temp_img
+        except:
+            return None
     
     def _preview_flyer(self):
         """Trigger the preview update on button click."""
@@ -713,7 +782,6 @@ class ModernFlyerGeneratorApp:
                 messagebox.showerror("Error", "The data file appears to be empty.")
                 return
 
-            # Generate flyers
             total_count = 0
             for index, row in df.iterrows():
                 name = str(row['name']).strip()
@@ -722,7 +790,7 @@ class ModernFlyerGeneratorApp:
                 if not name or name.lower() == 'nan' or not phone or phone.lower() == 'nan':
                     continue
                 
-                flyer_image = self._draw_flyer(None, name, phone)
+                flyer_image = self._draw_flyer(name, phone)
                 if flyer_image:
                     sanitized_name = re.sub(r'[^a-zA-Z0-9]', '', name)
                     flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
@@ -767,7 +835,7 @@ class ModernFlyerGeneratorApp:
         thread.start()
         
     def _send_whatsapp_flyers(self):
-        """Optimized WhatsApp flyer sending with faster processing and custom options."""
+        """Optimized WhatsApp flyer sending with proper message delivery timing."""
         if not self.whatsapp_automation.is_logged_in:
             messagebox.showerror("Error", "Please login to WhatsApp first!")
             return
@@ -812,24 +880,23 @@ class ModernFlyerGeneratorApp:
                     
                     if not os.path.exists(flyer_path):
                         failed_contacts.append(f"{name} (flyer not found)")
+                        time.sleep(1)
                         continue
                     
-                    # Fast chat opening
                     chat_opened = self.whatsapp_automation.open_chat_via_url(phone)
                     if not chat_opened:
                         chat_opened = self.whatsapp_automation.search_and_open_chat(name)
                     
                     if chat_opened:
-                        # Send custom message if enabled
                         if self.use_custom_message.get():
                             message = self.whatsapp_message.get().replace("{name}", name).replace("{phone}", phone)
                             message_sent = self.whatsapp_automation.send_message(message)
                             if not message_sent:
                                 failed_contacts.append(f"{name} (message failed)")
+                                time.sleep(1)
                                 continue
-                            time.sleep(0.5)  # Reduced delay
+                            # No additional sleep needed here since send_message() already waits 2 seconds
                         
-                        # Send image with optional custom caption
                         caption = ""
                         if self.use_custom_caption.get():
                             caption = self.image_caption.get().replace("{name}", name).replace("{phone}", phone)
@@ -837,13 +904,15 @@ class ModernFlyerGeneratorApp:
                         if self.whatsapp_automation.send_image(flyer_path, caption):
                             sent_count += 1
                             print(f"Successfully sent flyer to {name}")
+                            # Wait 2 seconds after image is sent to ensure proper delivery
+                            time.sleep(2)
                         else:
                             failed_contacts.append(f"{name} (image failed)")
-                        
-                        time.sleep(1)  # Reduced delay for faster processing
+                            time.sleep(1)
+                            
                     else:
                         failed_contacts.append(f"{name} (contact not found)")
-                        time.sleep(0.5)
+                        time.sleep(1)
                 
                 success_msg = f"Completed! Sent {sent_count}/{total_contacts} flyers."
                 if failed_contacts:
@@ -872,126 +941,62 @@ class ModernFlyerGeneratorApp:
         thread = threading.Thread(target=send_messages, daemon=True)
         thread.start()
 
-    def _draw_flyer(self, canvas, name, phone, preview_mode=False):
-        """Enhanced flyer drawing with coordinate-based positioning and styling."""
+    def _draw_flyer(self, name, phone):
+        """
+        Enhanced flyer drawing with coordinate-based positioning and styling.
+        Draws directly to a Pillow Image object.
+        """
         try:
             bg_image = Image.open(self.bg_image_path.get()).convert("RGBA")
             draw = ImageDraw.Draw(bg_image)
             
             self.original_image_size = bg_image.size
-            img_width, img_height = bg_image.size
-            
-            # Load font with proper path handling
-            font_path = self.selected_font.get()
-            if not os.path.exists(font_path):
-                font_path = str(self.FONT_FOLDER / font_path)
             
             try:
-                font = ImageFont.truetype(font_path, int(self.font_size.get()))
+                font_size = int(self.font_size.get() or 36)
+                name_x = int(float(self.name_x.get() or 0))
+                name_y = int(float(self.name_y.get() or 0))
+                phone_x = int(float(self.phone_x.get() or 0))
+                phone_y = int(float(self.phone_y.get() or 0))
+            except ValueError:
+                messagebox.showerror("Input Error", "Please enter valid numeric values for positions and font size.")
+                return None
+
+            font_path = self.selected_font.get()
+            try:
+                font_file = Path(font_path)
+                if not font_file.exists():
+                    font_file = self.FONT_FOLDER / font_file.name
+                
+                font = ImageFont.truetype(str(font_file), font_size)
             except Exception as e:
-                print(f"Font loading error: {e}")
+                print(f"Font loading error: {e}. Using default font.")
                 font = ImageFont.load_default()
             
             text_color = self.text_color.get()
             
-            if preview_mode:
-                canvas.delete("all")
-                
-                canvas_width = canvas.winfo_width()
-                canvas_height = canvas.winfo_height()
-                
-                if canvas_width <= 1 or canvas_height <= 1:
-                    canvas.update()
-                    canvas_width = canvas.winfo_width()
-                    canvas_height = canvas.winfo_height()
-                    if canvas_width <= 1 or canvas_height <= 1:
-                        canvas_width = 800
-                        canvas_height = 600
-                
-                self.scale_factor = min(canvas_width / img_width, canvas_height / img_height)
-                new_width = int(img_width * self.scale_factor)
-                new_height = int(img_height * self.scale_factor)
-                
-                bg_image_resized = bg_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                bg_image_tk = ImageTk.PhotoImage(bg_image_resized)
-                
-                img_x = canvas_width // 2
-                img_y = canvas_height // 2
-                canvas.create_image(img_x, img_y, anchor="center", image=bg_image_tk)
-                canvas._bg_image_tk = bg_image_tk
-                
-                img_left = img_x - new_width // 2
-                img_top = img_y - new_height // 2
-                
-                # Use coordinate inputs for positioning
-                name_canvas_x = img_left + int(float(self.name_x.get()) * self.scale_factor)
-                name_canvas_y = img_top + int(float(self.name_y.get()) * self.scale_factor)
-                phone_canvas_x = img_left + int(float(self.phone_x.get()) * self.scale_factor)
-                phone_canvas_y = img_top + int(float(self.phone_y.get()) * self.scale_factor)
-                
-                scaled_font_size = max(8, int(int(self.font_size.get()) * self.scale_factor))
-                
-                # Create font style string for preview
-                font_style = "Arial"
-                if self.text_bold.get():
-                    font_style += " bold"
-                if self.text_italic.get():
-                    font_style += " italic"
-                
-                # Draw shadow first if enabled
-                if self.text_shadow.get():
-                    shadow_offset = max(1, scaled_font_size // 20)
-                    canvas.create_text(
-                        name_canvas_x + shadow_offset, name_canvas_y + shadow_offset,
-                        text=name, fill=self.shadow_color.get(),
-                        font=(font_style, scaled_font_size), anchor="nw"
-                    )
-                    canvas.create_text(
-                        phone_canvas_x + shadow_offset, phone_canvas_y + shadow_offset,
-                        text=phone, fill=self.shadow_color.get(),
-                        font=(font_style, scaled_font_size), anchor="nw"
-                    )
-                
-                # Draw main text
-                canvas.create_text(
-                    name_canvas_x, name_canvas_y,
-                    text=name, fill=text_color,
-                    font=(font_style, scaled_font_size), anchor="nw"
-                )
-                
-                canvas.create_text(
-                    phone_canvas_x, phone_canvas_y,
-                    text=phone, fill=text_color,
-                    font=(font_style, scaled_font_size), anchor="nw"
-                )
-                
-                # Draw bounds
-                canvas.create_rectangle(img_left, img_top, img_left + new_width, img_top + new_height, 
-                                     outline="red", width=2)
-                
-            else:
-                # Actual flyer generation with effects
-                name_pos = (int(float(self.name_x.get())), int(float(self.name_y.get())))
-                phone_pos = (int(float(self.phone_x.get())), int(float(self.phone_y.get())))
-                
-                self._apply_text_effects(draw, name, name_pos, font, text_color)
-                self._apply_text_effects(draw, phone, phone_pos, font, text_color)
+            # Apply styling to the text and draw it on the image
+            name_pos = (name_x, name_y)
+            phone_pos = (phone_x, phone_y)
+            
+            self._apply_text_effects(draw, name, name_pos, font, text_color)
+            self._apply_text_effects(draw, phone, phone_pos, font, text_color)
 
-                # Add graphic if selected
-                if self.selected_graphic.get() and os.path.exists(self.selected_graphic.get()):
-                    try:
-                        graphic_image = Image.open(self.selected_graphic.get()).convert("RGBA")
-                        graphic_size = int(self.font_size.get())
-                        graphic_resized = graphic_image.resize((graphic_size, graphic_size))
-                        
-                        graphic_x = max(10, int(float(self.phone_x.get())) - graphic_size - 5)
-                        graphic_y = max(10, int(float(self.phone_y.get())) - graphic_size // 4)
-                        
-                        bg_image.paste(graphic_resized, (graphic_x, graphic_y), graphic_resized)
-                    except Exception as e:
-                        print(f"Error adding graphic: {e}")
-                
-                return bg_image
+            # Add graphic if selected
+            if self.selected_graphic.get() and os.path.exists(self.selected_graphic.get()):
+                try:
+                    graphic_image = Image.open(self.selected_graphic.get()).convert("RGBA")
+                    graphic_size = font_size  # Match font size
+                    graphic_resized = graphic_image.resize((graphic_size, graphic_size), Image.Resampling.LANCZOS)
+                    
+                    graphic_x = max(10, int(phone_x) - graphic_size - 5)
+                    graphic_y = max(10, int(phone_y) - graphic_size // 4)
+                    
+                    bg_image.paste(graphic_resized, (graphic_x, graphic_y), graphic_resized)
+                except Exception as e:
+                    print(f"Error adding graphic: {e}")
+            
+            return bg_image
 
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred during image processing: {e}")
@@ -1127,7 +1132,6 @@ class ModernFlyerGeneratorApp:
 
     def _create_text_tab(self, master):
         """Enhanced text styling controls."""
-        # Font selection with more options
         font_frame = ctk.CTkFrame(master, fg_color="transparent")
         font_frame.pack(pady=10, fill="x")
         
@@ -1148,7 +1152,6 @@ class ModernFlyerGeneratorApp:
         else:
             ctk.CTkLabel(font_frame, text="No fonts found in 'fonts' folder", text_color="red").pack()
 
-        # Font size
         size_frame = ctk.CTkFrame(master, fg_color="transparent")
         size_frame.pack(pady=10, fill="x")
         
@@ -1158,7 +1161,6 @@ class ModernFlyerGeneratorApp:
         size_entry.pack(fill="x")
         size_entry.bind("<KeyRelease>", lambda e: self._update_preview())
 
-        # Text color
         color_frame = ctk.CTkFrame(master, fg_color="transparent")
         color_frame.pack(pady=10, fill="x")
         
@@ -1177,7 +1179,6 @@ class ModernFlyerGeneratorApp:
             width=80
         ).pack(side="right")
 
-        # Text effects
         effects_frame = ctk.CTkFrame(master, fg_color="transparent")
         effects_frame.pack(pady=10, fill="x")
         
@@ -1186,7 +1187,6 @@ class ModernFlyerGeneratorApp:
         effects_grid = ctk.CTkFrame(effects_frame, fg_color="transparent")
         effects_grid.pack(fill="x")
         
-        # Text style checkboxes
         style_checks = [
             ("Bold", self.text_bold),
             ("Italic", self.text_italic),
@@ -1202,7 +1202,6 @@ class ModernFlyerGeneratorApp:
             )
             check.grid(row=i//2, column=i%2, sticky="w", padx=5, pady=2)
 
-        # Shadow effect
         shadow_frame = ctk.CTkFrame(master, fg_color="transparent")
         shadow_frame.pack(pady=10, fill="x")
         
@@ -1231,7 +1230,6 @@ class ModernFlyerGeneratorApp:
         """Create coordinate-based positioning controls."""
         ctk.CTkLabel(master, text="Text Positioning", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
         
-        # Name coordinates
         name_frame = ctk.CTkFrame(master, fg_color="transparent")
         name_frame.pack(pady=10, fill="x")
         
@@ -1250,7 +1248,6 @@ class ModernFlyerGeneratorApp:
         name_y_entry.pack(side="left", padx=5)
         name_y_entry.bind("<KeyRelease>", lambda e: self._update_coordinates())
         
-        # Phone coordinates
         phone_frame = ctk.CTkFrame(master, fg_color="transparent")
         phone_frame.pack(pady=10, fill="x")
         
@@ -1269,7 +1266,6 @@ class ModernFlyerGeneratorApp:
         phone_y_entry.pack(side="left", padx=5)
         phone_y_entry.bind("<KeyRelease>", lambda e: self._update_coordinates())
         
-        # Quick positioning buttons
         quick_pos_frame = ctk.CTkFrame(master, fg_color="transparent")
         quick_pos_frame.pack(pady=15, fill="x")
         
@@ -1296,7 +1292,6 @@ class ModernFlyerGeneratorApp:
             )
             btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky="ew")
         
-        # Configure grid columns to expand evenly
         for i in range(3):
             positions_grid.grid_columnconfigure(i, weight=1)
 
@@ -1370,7 +1365,6 @@ class ModernFlyerGeneratorApp:
                 text_color="gray"
             ).pack(pady=20)
         
-        # Clear graphic button
         ctk.CTkButton(
             master,
             text="Clear Graphic",
@@ -1381,7 +1375,6 @@ class ModernFlyerGeneratorApp:
 
     def _create_whatsapp_tab(self, master):
         """Enhanced WhatsApp automation controls with on/off switches."""
-        # Instructions
         instructions = ctk.CTkTextbox(master, height=100, wrap="word")
         instructions.pack(pady=10, fill="x")
         instructions.insert("0.0", 
@@ -1394,7 +1387,6 @@ class ModernFlyerGeneratorApp:
         )
         instructions.configure(state="disabled")
 
-        # Custom message section
         message_section = ctk.CTkFrame(master, fg_color="transparent")
         message_section.pack(pady=10, fill="x")
         
@@ -1420,7 +1412,6 @@ class ModernFlyerGeneratorApp:
         
         self.message_textbox.bind("<KeyRelease>", lambda e: update_message())
 
-        # Custom caption section
         caption_section = ctk.CTkFrame(master, fg_color="transparent")
         caption_section.pack(pady=10, fill="x")
         
@@ -1446,7 +1437,6 @@ class ModernFlyerGeneratorApp:
         
         self.caption_textbox.bind("<KeyRelease>", lambda e: update_caption())
 
-        # Variables help section
         variables_frame = ctk.CTkFrame(master, fg_color="transparent")
         variables_frame.pack(pady=10, fill="x")
         
@@ -1463,7 +1453,6 @@ class ModernFlyerGeneratorApp:
             justify="left"
         ).pack(anchor="w", pady=2)
 
-        # Speed optimization info
         speed_frame = ctk.CTkFrame(master, fg_color="#e6ffe6")
         speed_frame.pack(pady=10, fill="x")
         
@@ -1474,7 +1463,6 @@ class ModernFlyerGeneratorApp:
             justify="left"
         ).pack(pady=8)
 
-        # Warning section
         warning_frame = ctk.CTkFrame(master, fg_color="#ffebcc")
         warning_frame.pack(pady=10, fill="x")
         
@@ -1508,7 +1496,8 @@ def check_dependencies():
         'openpyxl': 'openpyxl',
         'customtkinter': 'customtkinter',
         'PIL': 'Pillow',
-        'webdriver_manager': 'webdriver-manager'
+        'webdriver_manager': 'webdriver-manager',
+        'pyperclip': 'pyperclip',
     }
     
     missing = []

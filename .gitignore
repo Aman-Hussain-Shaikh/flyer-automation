@@ -14,3 +14,6 @@ pyvenv.cfg
 pip-selfcheck.json
 user_data
 build
+
+user_data_0/
+user_data_1/
