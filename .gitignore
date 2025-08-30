@@ -13,3 +13,4 @@ Include/
 pyvenv.cfg
 pip-selfcheck.json
 user_data
+build
