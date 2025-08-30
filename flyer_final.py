@@ -888,15 +888,15 @@ class ModernFlyerGeneratorApp:
                         chat_opened = self.whatsapp_automation.search_and_open_chat(name)
                     
                     if chat_opened:
+                        message_sent_successfully = True
                         if self.use_custom_message.get():
                             message = self.whatsapp_message.get().replace("{name}", name).replace("{phone}", phone)
-                            message_sent = self.whatsapp_automation.send_message(message)
-                            if not message_sent:
+                            message_sent_successfully = self.whatsapp_automation.send_message(message)
+                            if not message_sent_successfully:
                                 failed_contacts.append(f"{name} (message failed)")
-                                time.sleep(1)
                                 continue
-                            # No additional sleep needed here since send_message() already waits 2 seconds
-                        
+                            time.sleep(2) # Wait after sending the text message to ensure it's delivered before the image
+
                         caption = ""
                         if self.use_custom_caption.get():
                             caption = self.image_caption.get().replace("{name}", name).replace("{phone}", phone)
@@ -904,8 +904,7 @@ class ModernFlyerGeneratorApp:
                         if self.whatsapp_automation.send_image(flyer_path, caption):
                             sent_count += 1
                             print(f"Successfully sent flyer to {name}")
-                            # Wait 2 seconds after image is sent to ensure proper delivery
-                            time.sleep(2)
+                            time.sleep(3) # A longer wait after sending the image to prevent rate limiting
                         else:
                             failed_contacts.append(f"{name} (image failed)")
                             time.sleep(1)
