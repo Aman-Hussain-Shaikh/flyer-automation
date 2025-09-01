@@ -6,7 +6,7 @@ from typing import List, Tuple
 from pathlib import Path
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
-from tkinter import filedialog, messagebox, colorchooser
+from tkinter import filedialog, messagebox, colorchooser, Toplevel
 import pandas as pd
 import sys
 from selenium import webdriver
@@ -328,7 +328,7 @@ class WhatsAppAutomation:
                 send_button_found = False
                 send_selectors = [
                     "//span[@data-testid='send']",
-                    "//button[@data-testid='send']", 
+                    "//button[@data-testid='send']",
                     "//div[@role='button'][@aria-label='Send']",
                     "//span[@data-icon='send']"
                 ]
@@ -413,7 +413,7 @@ class WhatsAppAutomation:
                 try:
                     # Try xclip for Linux
                     subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', image_path],  
-                                   check=True, capture_output=True)
+                                     check=True, capture_output=True)
                     return True
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     try:
@@ -532,6 +532,77 @@ class WhatsAppAutomation:
             self.driver = None
             self.is_logged_in = False
 
+class ModalProgress(ctk.CTkToplevel):
+    """Custom modal window for displaying progress."""
+    def __init__(self, master, total_count):
+        super().__init__(master)
+        self.title("Sending Flyers...")
+        self.geometry("400x250")
+        self.transient(master)  # Make modal
+        self.grab_set()         # Grab all events
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        self.total_count = total_count
+
+        self.status_label = ctk.CTkLabel(self, text="Preparing to send...", font=ctk.CTkFont(size=14, weight="bold"))
+        self.status_label.pack(pady=10)
+
+        self.current_contact_label = ctk.CTkLabel(self, text="")
+        self.current_contact_label.pack(pady=5)
+
+        self.progress_label = ctk.CTkLabel(self, text="0/0 (0%)")
+        self.progress_label.pack(pady=5)
+
+        self.progress_bar = ctk.CTkProgressBar(self, mode="determinate")
+        self.progress_bar.pack(fill="x", padx=20, pady=10)
+        self.progress_bar.set(0)
+
+        self.timer_label = ctk.CTkLabel(self, text="Elapsed Time: 00:00")
+        self.timer_label.pack(pady=5)
+
+        self.close_button = ctk.CTkButton(self, text="Close", command=self.on_closing, state="disabled")
+        self.close_button.pack(pady=10)
+
+    def on_closing(self):
+        """Handles closing the modal window."""
+        self.grab_release()
+        self.destroy()
+
+    def update_progress(self, current_index, current_name, elapsed_time):
+        """Updates the progress labels and bar."""
+        progress_value = (current_index + 1) / self.total_count
+        
+        self.status_label.configure(text="Sending...")
+        self.current_contact_label.configure(text=f"Current: {current_name}")
+        self.progress_label.configure(text=f"{current_index + 1}/{self.total_count} ({progress_value * 100:.1f}%)")
+        self.progress_bar.set(progress_value)
+
+        minutes = int(elapsed_time // 60)
+        seconds = int(elapsed_time % 60)
+        self.timer_label.configure(text=f"Elapsed Time: {minutes:02d}:{seconds:02d}")
+
+    def show_final_report(self, sent_count, failed_contacts, total_time):
+        """Displays the final report in the modal."""
+        self.status_label.configure(text="Sending complete!")
+        self.current_contact_label.configure(text="")
+        
+        minutes = int(total_time // 60)
+        seconds = int(total_time % 60)
+        final_time_text = f"Total Time: {minutes:02d}:{seconds:02d}"
+
+        report_text = f"Sent: {sent_count}\nFailed: {len(failed_contacts)}\n\n{final_time_text}"
+        if failed_contacts:
+            failed_list = "\n".join(failed_contacts[:5])
+            if len(failed_contacts) > 5:
+                failed_list += "\n..."
+            report_text += f"\n\nFailed contacts:\n{failed_list}"
+        
+        self.progress_label.configure(text=report_text)
+        self.progress_bar.set(1)
+        self.timer_label.configure(text="") # Clear timer after process
+        self.close_button.configure(state="normal")
+        
+
 class ModernFlyerGeneratorApp:
     """Enhanced flyer generation application with coordinate-based positioning and improved styling."""
     
@@ -585,6 +656,7 @@ class ModernFlyerGeneratorApp:
         # Store the original image size for coordinate calculation
         self.original_image_size = (0, 0)
         self.scale_factor = 1.0
+        self.progress_modal = None
 
         # Define application folders
         self.BASE_DIR = Path(__file__).parent
@@ -879,20 +951,24 @@ class ModernFlyerGeneratorApp:
             messagebox.showerror("Error", "Please generate flyers first!")
             return
 
+        # Start the modal progress window
+        self.progress_modal = ModalProgress(self.root, len(self._get_valid_contacts()))
+        
         def send_messages():
+            start_time = time.time()
             try:
                 if self.data_path.get().endswith('.csv'):
                     df = pd.read_csv(self.data_path.get())
                 elif self.data_path.get().endswith('.xlsx'):
                     df = pd.read_excel(self.data_path.get())
                 else:
-                    self.root.after(0, lambda: self.status_label.configure(text="Unsupported file type."))
+                    self.root.after(0, lambda: self.progress_modal.show_final_report(0, [], time.time() - start_time))
                     return
 
                 df.columns = df.columns.str.lower().str.strip()
                 
                 if 'name' not in df.columns or 'number' not in df.columns:
-                    self.root.after(0, lambda: self.status_label.configure(text="Missing 'name' or 'number' columns."))
+                    self.root.after(0, lambda: self.progress_modal.show_final_report(0, [], time.time() - start_time))
                     return
 
                 total_contacts = len(df)
@@ -906,10 +982,11 @@ class ModernFlyerGeneratorApp:
                     if not name or name.lower() == 'nan' or not phone or phone.lower() == 'nan':
                         continue
                     
-                    self.root.after(0, lambda n=name, sc=sent_count, tc=total_contacts: 
-                        self.status_label.configure(text=f"Sending to {n} ({sc + 1}/{tc})...")
-                    )
-                    
+                    # Update modal with current progress
+                    elapsed_time = time.time() - start_time
+                    self.root.after(0, lambda i=index, n=name, et=elapsed_time:
+                        self.progress_modal.update_progress(i, n, et))
+
                     sanitized_name = re.sub(r'[^a-zA-Z0-9_\-]', '', name)
                     flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
                     
@@ -1007,21 +1084,13 @@ class ModernFlyerGeneratorApp:
                     print(f"--- Completed {name} ---\n")
                     time.sleep(1)  # Brief pause between contacts
                 
-                success_msg = f"Completed! Sent {sent_count}/{total_contacts} flyers."
-                if failed_contacts:
-                    failed_msg = f"\n\nFailed: " + ", ".join(failed_contacts[:5])
-                    if len(failed_contacts) > 5:
-                        failed_msg += f" and {len(failed_contacts) - 5} more"
-                    success_msg += failed_msg
-                
-                self.root.after(0, lambda: self.status_label.configure(text=success_msg))
-                self.root.after(0, lambda: messagebox.showinfo("Complete", 
-                    f"Sent: {sent_count}/{total_contacts}\nFailed: {len(failed_contacts)}"
-                ))
-                
+                total_time = time.time() - start_time
+                self.root.after(0, lambda: self.progress_modal.show_final_report(sent_count, failed_contacts, total_time))
+            
             except Exception as e:
                 error_msg = f"Error: {e}"
-                self.root.after(0, lambda: self.status_label.configure(text=error_msg))
+                total_time = time.time() - start_time
+                self.root.after(0, lambda: self.progress_modal.show_final_report(sent_count, failed_contacts, total_time))
                 self.root.after(0, lambda: messagebox.showerror("Error", error_msg))
             
             finally:
@@ -1032,6 +1101,30 @@ class ModernFlyerGeneratorApp:
         self.whatsapp_send_btn.configure(text="Sending...", state="disabled")
         thread = threading.Thread(target=send_messages, daemon=True)
         thread.start()
+        
+    def _get_valid_contacts(self):
+        """Helper to get the number of valid contacts for the progress bar."""
+        try:
+            if self.data_path.get().endswith('.csv'):
+                df = pd.read_csv(self.data_path.get())
+            elif self.data_path.get().endswith('.xlsx'):
+                df = pd.read_excel(self.data_path.get())
+            else:
+                return []
+            
+            df.columns = df.columns.str.lower().str.strip()
+            if 'name' not in df.columns or 'number' not in df.columns:
+                return []
+            
+            valid_contacts = []
+            for _, row in df.iterrows():
+                name = str(row['name']).strip()
+                phone = str(row['number']).strip()
+                if name and name.lower() != 'nan' and phone and phone.lower() != 'nan':
+                    valid_contacts.append(row)
+            return valid_contacts
+        except:
+            return []
 
     def _draw_flyer(self, name, phone):
         """
@@ -1584,7 +1677,7 @@ def check_dependencies():
     """Check if all required packages are installed."""
     required_packages = {
         'selenium': 'selenium',
-        'pandas': 'pandas', 
+        'pandas': 'pandas',  
         'openpyxl': 'openpyxl',
         'customtkinter': 'customtkinter',
         'PIL': 'Pillow',
