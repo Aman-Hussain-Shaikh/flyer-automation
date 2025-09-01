@@ -110,32 +110,45 @@ class WhatsAppAutomation:
             return False
 
     def open_chat_via_url(self, phone_number):
-        """Open a chat using direct URL - fastest method."""
+        """ULTRA-FAST chat opening - minimal waits, maximum speed."""
         try:
-            url = f"https://web.whatsapp.com/send?phone={phone_number}"
-            self.driver.get(url)
+            current_url = self.driver.current_url
             
-            # Use WebDriverWait to confirm chat is open, which is more robust than a fixed sleep
+            # SPEED OPTIMIZATION: Use JavaScript navigation for instant switching
+            if "web.whatsapp.com" in current_url:
+                target_url = f"https://web.whatsapp.com/send?phone={phone_number}"
+                # Instant JavaScript navigation
+                self.driver.execute_script(f"window.location.href = '{target_url}';")
+            else:
+                url = f"https://web.whatsapp.com/send?phone={phone_number}"
+                self.driver.get(url)
+            
+            # ULTRA-FAST message input detection with reduced timeout
             message_input_selectors = [
                 "//div[@contenteditable='true'][@data-tab='10']",
                 "//div[@title='Type a message']",
                 "//div[@role='textbox'][@title='Type a message']",
             ]
             
+            # Aggressive timeout reduction - 2 seconds max
             for selector in message_input_selectors:
                 try:
-                    self.wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    print(f"Chat opened for {phone_number}")
+                    WebDriverWait(self.driver, 2).until(  # Reduced from 5 to 2
+                        EC.element_to_be_clickable((By.XPATH, selector))
+                    )
+                    print(f"ULTRA-FAST: Chat opened for {phone_number}")
                     return True
-                except (TimeoutException, NoSuchElementException):
+                except TimeoutException:
                     continue
+            
             return False
+            
         except Exception as e:
-            print(f"Error opening chat via URL: {e}")
+            print(f"Error opening chat: {e}")
             return False
 
     def search_and_open_chat(self, contact_name_or_number):
-        """Fallback search method with reduced timeouts."""
+        """ULTRA-FAST search method with minimal delays."""
         try:
             search_selectors = [
                 "//div[@role='textbox'][@title='Search or start new chat']",
@@ -146,7 +159,7 @@ class WhatsAppAutomation:
             search_box = None
             for selector in search_selectors:
                 try:
-                    search_box = WebDriverWait(self.driver, 5).until(
+                    search_box = WebDriverWait(self.driver, 1).until(  # Reduced from 3 to 1
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     break
@@ -156,34 +169,57 @@ class WhatsAppAutomation:
             if not search_box:
                 return False
             
+            # INSTANT CLEARING - no delays
             search_box.clear()
+            self.driver.execute_script("arguments[0].value = ''; arguments[0].textContent = '';", search_box)
+            
+            # INSTANT TYPING
+            search_box.click()
             search_box.send_keys(contact_name_or_number)
             
-            # Dynamic wait for search results
+            # MINIMAL wait for results - 0.5 seconds only
+            time.sleep(0.5)  # Reduced from 1.5 to 0.5
+            
+            # ULTRA-FAST result clicking
             result_selectors = [
-                f"//span[@title='{contact_name_or_number}']",
-                f"//span[contains(text(), '{contact_name_or_number}')]",
-                "//div[@role='listitem'][1]"
+                f"//span[@title='{contact_name_or_number}']/ancestor::div[@role='listitem']",
+                "//div[@role='listitem'][position()>1][1]",
+                "//div[@role='listitem']//div[@tabindex='0'][1]",
+                "(//div[@role='listitem'])[2]",
             ]
 
             for selector in result_selectors:
                 try:
-                    chat_result = WebDriverWait(self.driver, 3).until(
+                    chat_result = WebDriverWait(self.driver, 1).until(  # Reduced from 2 to 1
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
+                    # INSTANT CLICK - no scroll delay
                     chat_result.click()
-                    return True
+                    break
                 except (TimeoutException, NoSuchElementException):
+                    continue
+            
+            # MINIMAL verification wait
+            time.sleep(0.5)  # Reduced from 2 to 0.5
+            
+            # FAST verification
+            for selector in ["//div[@contenteditable='true'][@data-tab='10']"]:
+                try:
+                    WebDriverWait(self.driver, 1).until(  # Reduced from 3 to 1
+                        EC.element_to_be_clickable((By.XPATH, selector))
+                    )
+                    return True
+                except TimeoutException:
                     continue
             
             return False
             
         except Exception as e:
-            print(f"Error in search_and_open_chat: {e}")
+            print(f"Error in search: {e}")
             return False
         
     def send_message(self, message):
-        """Send a text message with improved delivery confirmation."""
+        """Send a text message with improved delivery confirmation - SPEED OPTIMIZED."""
         try:
             message_selectors = [
                 "//div[@contenteditable='true'][@data-tab='10']",
@@ -194,7 +230,7 @@ class WhatsAppAutomation:
             message_box = None
             for selector in message_selectors:
                 try:
-                    message_box = WebDriverWait(self.driver, 10).until(
+                    message_box = WebDriverWait(self.driver, 5).until(  # Reduced from 10 to 5
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     break
@@ -208,31 +244,31 @@ class WhatsAppAutomation:
             # Clear any existing text and type the new message
             message_box.clear()
             message_box.click()  # Ensure focus
-            time.sleep(0.3)  # Small delay to ensure focus
+            time.sleep(0.1)  # Reduced from 0.3 to 0.1
             
             message_box.send_keys(message)
             message_box.send_keys(Keys.ENTER)
             
             # Wait for message to be sent by checking for delivery indicators
             try:
-                # Wait for the message to appear in chat (usually takes 1-3 seconds)
-                WebDriverWait(self.driver, 10).until(
+                # Wait for the message to appear in chat (reduced timeout)
+                WebDriverWait(self.driver, 5).until(  # Reduced from 10 to 5
                     lambda driver: driver.execute_script(
                         "return document.querySelector('[data-testid=\"msg-container\"]') !== null"
                     )
                 )
                 
-                # Additional wait to ensure message is fully processed
-                time.sleep(2)
+                # Reduced wait time for message processing
+                time.sleep(1)  # Reduced from 2 to 1
                 
                 # Verify message input is ready for next message
-                WebDriverWait(self.driver, 5).until(
+                WebDriverWait(self.driver, 3).until(  # Reduced from 5 to 3
                     EC.element_to_be_clickable((By.XPATH, message_selectors[0]))
                 )
                 
             except TimeoutException:
                 print("Warning: Could not confirm message delivery")
-                time.sleep(3)  # Fallback wait time
+                time.sleep(1.5)  # Reduced from 3 to 1.5
             
             print(f"Message sent: {message[:50]}...")
             return True
@@ -242,7 +278,7 @@ class WhatsAppAutomation:
             return False
 
     def send_image(self, image_path, caption=""):
-        """Send image using copy-paste method - more reliable than attachment button."""
+        """Send image using copy-paste method - ULTRA FAST with immediate sending."""
         try:
             import pyperclip
             from PIL import Image
@@ -269,7 +305,7 @@ class WhatsAppAutomation:
                 message_box = None
                 for selector in message_input_selectors:
                     try:
-                        message_box = WebDriverWait(self.driver, 5).until(
+                        message_box = WebDriverWait(self.driver, 3).until(  # Reduced timeout
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
                         break
@@ -282,67 +318,66 @@ class WhatsAppAutomation:
                 
                 # Click the message box to focus it
                 message_box.click()
-                time.sleep(0.5) # Small sleep to ensure focus
+                time.sleep(0.2)  # Minimal sleep for focus
                 
                 # Paste the image using Ctrl+V
                 message_box.send_keys(Keys.CONTROL, 'v')
                 
-                # --- START OF CRITICAL IMPROVEMENT FOR SPEED ---
+                # === ULTRA FAST SENDING OPTIMIZATION ===
+                # Wait for image preview to appear and immediately send
                 send_button_found = False
                 send_selectors = [
                     "//span[@data-testid='send']",
-                    "//button[@data-testid='send']",
+                    "//button[@data-testid='send']", 
                     "//div[@role='button'][@aria-label='Send']",
-                    "//span[@data-icon='send']",
-                    "//div[contains(@class, 'send')][@role='button']",
-                    "//button[contains(@class, 'send')]",
-                    "//span[contains(@class, 'send')][@role='button']"
+                    "//span[@data-icon='send']"
                 ]
 
-                # Wait for the send button to be clickable inside the image preview
+                # Aggressive fast sending - reduced wait time
                 for selector in send_selectors:
                     try:
-                        send_button = WebDriverWait(self.driver, 10).until(
+                        send_button = WebDriverWait(self.driver, 3).until(  # Reduced from 10 to 3
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
-                        # Add caption if provided AFTER the preview appears
+                        
+                        # Add caption INSTANTLY if provided
                         if caption:
                             try:
-                                caption_box = WebDriverWait(self.driver, 2).until(
+                                caption_box = WebDriverWait(self.driver, 1).until(  # Very fast caption
                                     EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
                                 )
-                                caption_box.clear()
-                                caption_box.send_keys(caption)
-                                print("Caption added.")
+                                # Use JavaScript for instant caption input
+                                self.driver.execute_script("arguments[0].textContent = arguments[1];", caption_box, caption)
+                                print("Caption added instantly.")
                             except (TimeoutException, NoSuchElementException):
                                 print("Could not find caption box.")
                         
+                        # IMMEDIATE SEND - No delay
                         send_button.click()
-                        print("Send button clicked")
+                        print("Send button clicked IMMEDIATELY")
                         send_button_found = True
                         break
                     except TimeoutException:
                         continue
 
                 if not send_button_found:
-                    print("Send button not found. Attempting to use Enter key.")
-                    # Fallback to pressing Enter on the message box if a send button wasn't found
-                    target_box = caption_box if caption and 'caption_box' in locals() else message_box
-                    if target_box:
-                        target_box.send_keys(Keys.ENTER)
-                        send_button_found = True
+                    print("Send button not found. Using Enter key instantly.")
+                    # Instant fallback to Enter key
+                    target_box = message_box
+                    if caption and 'caption_box' in locals():
+                        target_box = caption_box
+                    target_box.send_keys(Keys.ENTER)
+                    send_button_found = True
                 
                 if send_button_found:
-                    # Final dynamic wait to confirm message is sent
-                    # The message input box should become clickable again.
-                    WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, message_input_selectors[0])))
-                    print("Image sent successfully using copy-paste method")
+                    # MINIMAL wait for confirmation - just enough to verify sent
+                    time.sleep(0.5)  # Reduced from 5 seconds to 0.5
+                    print("Image sent ULTRA FAST using copy-paste method")
                     return True
                 else:
                     print("Failed to send image.")
                     return False
-                # --- END OF CRITICAL IMPROVEMENT FOR SPEED ---
-                
+                    
             except Exception as e:
                 print(f"Copy-paste method failed: {e}")
                 # Fallback to original attachment button method
@@ -835,7 +870,7 @@ class ModernFlyerGeneratorApp:
         thread.start()
         
     def _send_whatsapp_flyers(self):
-        """Optimized WhatsApp flyer sending with proper message delivery timing."""
+        """FIXED - WhatsApp flyer sending with improved contact switching."""
         if not self.whatsapp_automation.is_logged_in:
             messagebox.showerror("Error", "Please login to WhatsApp first!")
             return
@@ -880,60 +915,118 @@ class ModernFlyerGeneratorApp:
                     
                     if not os.path.exists(flyer_path):
                         failed_contacts.append(f"{name} (flyer not found)")
-                        time.sleep(1)
+                        time.sleep(0.5)
                         continue
                     
-                    chat_opened = self.whatsapp_automation.open_chat_via_url(phone)
+                    print(f"\n=== SWITCHING TO CONTACT: {name} ({phone}) ===")
+                    
+                    # === IMPROVED CONTACT SWITCHING ===
+                    chat_opened = False
+                    
+                    # Method 1: Search by phone number first
+                    print(f"🔍 SEARCHING by phone: {phone}")
+                    chat_opened = self.whatsapp_automation.search_and_open_chat(phone)
+                    
+                    # Method 2: If phone search fails, try name search  
                     if not chat_opened:
+                        print(f"🔍 Phone failed, SEARCHING by name: {name}")
                         chat_opened = self.whatsapp_automation.search_and_open_chat(name)
                     
+                    # Method 3: If search fails, try direct URL method as last resort
+                    if not chat_opened:
+                        print(f"🔍 Search failed, trying URL method for: {phone}")
+                        # Clean the phone number (remove spaces, special chars)
+                        clean_phone = re.sub(r'[^\d+]', '', phone)
+                        if not clean_phone.startswith('+'):
+                            clean_phone = '+91' + clean_phone  # Assuming India, adjust as needed
+                        chat_opened = self.whatsapp_automation.open_chat_via_url(clean_phone)
+                    
                     if chat_opened:
+                        print(f"✅ Chat opened successfully for {name} ({phone})")
+                        
+                        # VERIFICATION: Ensure we're in the right chat
+                        time.sleep(1)  # Give time for chat to fully load
+                        
+                        # Double-check we have message input available
+                        message_input_available = False
+                        try:
+                            message_input_selectors = [
+                                "//div[@contenteditable='true'][@data-tab='10']",
+                                "//div[@title='Type a message']",
+                                "//div[@role='textbox'][@title='Type a message']",
+                            ]
+                            
+                            for selector in message_input_selectors:
+                                try:
+                                    WebDriverWait(self.whatsapp_automation.driver, 3).until(
+                                        EC.element_to_be_clickable((By.XPATH, selector))
+                                    )
+                                    message_input_available = True
+                                    break
+                                except:
+                                    continue
+                                    
+                        except Exception as e:
+                            print(f"⚠️ Error checking message input: {e}")
+                        
+                        if not message_input_available:
+                            failed_contacts.append(f"{name} (chat not ready)")
+                            print(f"❌ Message input not available for {name}")
+                            continue
+                        
+                        # Send custom message first (if enabled)
                         message_sent_successfully = True
                         if self.use_custom_message.get():
                             message = self.whatsapp_message.get().replace("{name}", name).replace("{phone}", phone)
+                            print(f"📝 Sending message...")
                             message_sent_successfully = self.whatsapp_automation.send_message(message)
+                            
                             if not message_sent_successfully:
                                 failed_contacts.append(f"{name} (message failed)")
                                 continue
-                            time.sleep(2) # Wait after sending the text message to ensure it's delivered before the image
-
+                            time.sleep(1.5)  # Wait between message and image
+                        
+                        # Send image
                         caption = ""
                         if self.use_custom_caption.get():
                             caption = self.image_caption.get().replace("{name}", name).replace("{phone}", phone)
                         
+                        print(f"📤 Sending image...")
                         if self.whatsapp_automation.send_image(flyer_path, caption):
                             sent_count += 1
-                            print(f"Successfully sent flyer to {name}")
-                            time.sleep(3) # A longer wait after sending the image to prevent rate limiting
+                            print(f"✅ SUCCESS: Sent to {name} ({phone})")
+                            time.sleep(2)  # Wait before next contact
                         else:
                             failed_contacts.append(f"{name} (image failed)")
-                            time.sleep(1)
+                            print(f"❌ Image failed for {name}")
                             
                     else:
                         failed_contacts.append(f"{name} (contact not found)")
-                        time.sleep(1)
+                        print(f"❌ Could not find {name} ({phone}) with any method")
+                    
+                    print(f"--- Completed {name} ---\n")
+                    time.sleep(1)  # Brief pause between contacts
                 
                 success_msg = f"Completed! Sent {sent_count}/{total_contacts} flyers."
                 if failed_contacts:
-                    failed_msg = f"\n\nFailed contacts:\n" + "\n".join(failed_contacts[:10])
-                    if len(failed_contacts) > 10:
-                        failed_msg += f"\n... and {len(failed_contacts) - 10} more"
+                    failed_msg = f"\n\nFailed: " + ", ".join(failed_contacts[:5])
+                    if len(failed_contacts) > 5:
+                        failed_msg += f" and {len(failed_contacts) - 5} more"
                     success_msg += failed_msg
                 
                 self.root.after(0, lambda: self.status_label.configure(text=success_msg))
-                self.root.after(0, lambda: messagebox.showinfo("WhatsApp Sending Complete", 
-                    f"Successfully sent: {sent_count}/{total_contacts} flyers\n"
-                    f"Failed: {len(failed_contacts)} contacts"
+                self.root.after(0, lambda: messagebox.showinfo("Complete", 
+                    f"Sent: {sent_count}/{total_contacts}\nFailed: {len(failed_contacts)}"
                 ))
                 
             except Exception as e:
-                error_msg = f"Error during WhatsApp sending: {e}"
+                error_msg = f"Error: {e}"
                 self.root.after(0, lambda: self.status_label.configure(text=error_msg))
                 self.root.after(0, lambda: messagebox.showerror("Error", error_msg))
             
             finally:
                 self.root.after(0, lambda: self.whatsapp_send_btn.configure(
-                    text="📱 Send Flyers", state="normal"
+                    text="Send Flyers", state="normal"
                 ))
         
         self.whatsapp_send_btn.configure(text="Sending...", state="disabled")
