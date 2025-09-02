@@ -23,6 +23,69 @@ import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
+class GenerationProgressModal(ctk.CTkToplevel):
+    """Modal window to show flyer generation progress."""
+    
+    def __init__(self, master, total_count):
+        super().__init__(master)
+        self.title("Generating Flyers...")
+        self.geometry("400x200")
+        self.transient(master)  # Make modal
+        self.grab_set()          # Grab all events
+        
+        self.total_count = total_count
+        self.current_index = 0
+        
+        # Center the modal on the parent window
+        self.update_idletasks()
+        x = master.winfo_x() + (master.winfo_width() - self.winfo_width()) // 2
+        y = master.winfo_y() + (master.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        self.status_label = ctk.CTkLabel(
+            self, 
+            text="Starting flyer generation...", 
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.status_label.pack(pady=10)
+        
+        self.progress_label = ctk.CTkLabel(self, text="0/0 (0%)")
+        self.progress_label.pack(pady=5)
+        
+        self.progress_bar = ctk.CTkProgressBar(self, mode="determinate")
+        self.progress_bar.pack(fill="x", padx=20, pady=10)
+        self.progress_bar.set(0)
+        
+        self.cancel_button = ctk.CTkButton(
+            self, 
+            text="Cancel", 
+            command=self.cancel,
+            fg_color="red",
+            hover_color="darkred"
+        )
+        self.cancel_button.pack(pady=10)
+        
+        self.cancelled = False
+        
+    def update_progress(self, current_index, current_name):
+        """Update the progress display."""
+        self.current_index = current_index
+        progress_value = (current_index + 1) / self.total_count
+        
+        self.status_label.configure(text=f"Generating: {current_name}")
+        self.progress_label.configure(text=f"{current_index + 1}/{self.total_count} ({progress_value * 100:.1f}%)")
+        self.progress_bar.set(progress_value)
+        
+        # Update the window to show changes
+        self.update_idletasks()
+        
+    def cancel(self):
+        """Cancel the generation process."""
+        self.cancelled = True
+        self.status_label.configure(text="Cancelling...")
+        self.cancel_button.configure(state="disabled")
+
 class WhatsAppAutomation:
     """Handles WhatsApp Web automation using Selenium with multi-instance support."""
     
@@ -63,7 +126,7 @@ class WhatsAppAutomation:
             # Execute scripts to hide automation
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            self.wait = WebDriverWait(self.driver, 20)  # Wait for up to 20 seconds
+            self.wait = WebDriverWait(self.driver, 15)  # Reduced from 20 to 15 seconds
             return True
             
         except Exception as e:
@@ -91,7 +154,7 @@ class WhatsAppAutomation:
                 "//span[@data-testid='menu']",
             ]
             
-            for _ in range(30):
+            for _ in range(25):  # Reduced from 30 to 25
                 for selector in login_selectors:
                     try:
                         element = self.driver.find_element(By.XPATH, selector)
@@ -102,7 +165,7 @@ class WhatsAppAutomation:
                             return True
                     except (NoSuchElementException, WebDriverException):
                         continue
-                time.sleep(2)
+                time.sleep(1.5)  # Reduced from 2 to 1.5
             
             if callback:
                 callback(f"Instance {self.instance_id}: Login timeout. Please try again.")
@@ -134,10 +197,10 @@ class WhatsAppAutomation:
                 "//div[@role='textbox'][@title='Type a message']",
             ]
             
-            # Aggressive timeout reduction - 2 seconds max
+            # Aggressive timeout reduction - 1.5 seconds max
             for selector in message_input_selectors:
                 try:
-                    WebDriverWait(self.driver, 2).until(  # Reduced from 5 to 2
+                    WebDriverWait(self.driver, 1.5).until(  # Reduced from 2 to 1.5
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     print(f"ULTRA-FAST: Chat opened for {phone_number}")
@@ -163,7 +226,7 @@ class WhatsAppAutomation:
             search_box = None
             for selector in search_selectors:
                 try:
-                    search_box = WebDriverWait(self.driver, 1).until(  # Reduced from 3 to 1
+                    search_box = WebDriverWait(self.driver, 0.8).until(  # Reduced from 1 to 0.8
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     break
@@ -181,8 +244,8 @@ class WhatsAppAutomation:
             search_box.click()
             self._simulate_human_typing(search_box, contact_name_or_number)
             
-            # MINIMAL wait for results - 0.5 seconds only
-            time.sleep(0.5)  # Reduced from 1.5 to 0.5
+            # MINIMAL wait for results - 0.3 seconds only
+            time.sleep(0.3)  # Reduced from 0.5 to 0.3
             
             # ULTRA-FAST result clicking
             result_selectors = [
@@ -194,7 +257,7 @@ class WhatsAppAutomation:
 
             for selector in result_selectors:
                 try:
-                    chat_result = WebDriverWait(self.driver, 1).until(  # Reduced from 2 to 1
+                    chat_result = WebDriverWait(self.driver, 0.8).until(  # Reduced from 1 to 0.8
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     # INSTANT CLICK - no scroll delay
@@ -204,12 +267,12 @@ class WhatsAppAutomation:
                     continue
             
             # MINIMAL verification wait
-            time.sleep(0.5)  # Reduced from 2 to 0.5
+            time.sleep(0.3)  # Reduced from 0.5 to 0.3
             
             # FAST verification
             for selector in ["//div[@contenteditable='true'][@data-tab='10']"]:
                 try:
-                    WebDriverWait(self.driver, 1).until(  # Reduced from 3 to 1
+                    WebDriverWait(self.driver, 0.8).until(  # Reduced from 1 to 0.8
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     return True
@@ -234,7 +297,7 @@ class WhatsAppAutomation:
             message_box = None
             for selector in message_selectors:
                 try:
-                    message_box = WebDriverWait(self.driver, 5).until(  # Reduced from 10 to 5
+                    message_box = WebDriverWait(self.driver, 3).until(  # Reduced from 5 to 3
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     break
@@ -248,7 +311,7 @@ class WhatsAppAutomation:
             # Clear any existing text and type the new message
             message_box.clear()
             message_box.click()  # Ensure focus
-            time.sleep(0.1)  # Reduced from 0.3 to 0.1
+            time.sleep(0.05)  # Reduced from 0.1 to 0.05
             
             self._simulate_human_typing(message_box, message)
             message_box.send_keys(Keys.ENTER)
@@ -256,23 +319,23 @@ class WhatsAppAutomation:
             # Wait for message to be sent by checking for delivery indicators
             try:
                 # Wait for the message to appear in chat (reduced timeout)
-                WebDriverWait(self.driver, 5).until(  # Reduced from 10 to 5
+                WebDriverWait(self.driver, 3).until(  # Reduced from 5 to 3
                     lambda driver: driver.execute_script(
                         "return document.querySelector('[data-testid=\"msg-container\"]') !== null"
                     )
                 )
                 
                 # Reduced wait time for message processing
-                time.sleep(1)  # Reduced from 2 to 1
+                time.sleep(0.5)  # Reduced from 1 to 0.5
                 
                 # Verify message input is ready for next message
-                WebDriverWait(self.driver, 3).until(  # Reduced from 5 to 3
+                WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                     EC.element_to_be_clickable((By.XPATH, message_selectors[0]))
                 )
                 
             except TimeoutException:
                 print("Warning: Could not confirm message delivery")
-                time.sleep(1.5)  # Reduced from 3 to 1.5
+                time.sleep(1)  # Reduced from 1.5 to 1
             
             print(f"Message sent: {message[:50]}...")
             return True
@@ -309,7 +372,7 @@ class WhatsAppAutomation:
                 message_box = None
                 for selector in message_input_selectors:
                     try:
-                        message_box = WebDriverWait(self.driver, 3).until(  # Reduced timeout
+                        message_box = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
                         break
@@ -322,7 +385,7 @@ class WhatsAppAutomation:
                 
                 # Click the message box to focus it
                 message_box.click()
-                time.sleep(0.2)  # Minimal sleep for focus
+                time.sleep(0.1)  # Reduced from 0.2 to 0.1
                 
                 # Paste the image using Ctrl+V
                 message_box.send_keys(Keys.CONTROL, 'v')
@@ -340,14 +403,14 @@ class WhatsAppAutomation:
                 # Aggressive fast sending - reduced wait time
                 for selector in send_selectors:
                     try:
-                        send_button = WebDriverWait(self.driver, 3).until(  # Reduced from 10 to 3
+                        send_button = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
                         
                         # Add caption INSTANTLY if provided
                         if caption:
                             try:
-                                caption_box = WebDriverWait(self.driver, 1).until(  # Very fast caption
+                                caption_box = WebDriverWait(self.driver, 0.8).until(  # Reduced from 1 to 0.8
                                     EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
                                 )
                                 # Use JavaScript for instant caption input
@@ -375,7 +438,7 @@ class WhatsAppAutomation:
                 
                 if send_button_found:
                     # MINIMAL wait for confirmation - just enough to verify sent
-                    time.sleep(0.5)  # Reduced from 5 seconds to 0.5
+                    time.sleep(0.3)  # Reduced from 0.5 to 0.3
                     print("Image sent ULTRA FAST using copy-paste method")
                     return True
                 else:
@@ -442,7 +505,7 @@ class WhatsAppAutomation:
             attachment_button = None
             for selector in attach_selectors:
                 try:
-                    attachment_button = WebDriverWait(self.driver, 3).until(
+                    attachment_button = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     attachment_button.click()
@@ -460,7 +523,7 @@ class WhatsAppAutomation:
             
             for selector in photo_video_selectors:
                 try:
-                    photo_option = WebDriverWait(self.driver, 3).until(
+                    photo_option = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     photo_option.click()
@@ -476,7 +539,7 @@ class WhatsAppAutomation:
             file_input = None
             for selector in file_input_selectors:
                 try:
-                    file_input = WebDriverWait(self.driver, 3).until(
+                    file_input = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                         EC.presence_of_element_located((By.XPATH, selector))
                     )
                     break
@@ -490,7 +553,7 @@ class WhatsAppAutomation:
             
             # Use dynamic wait instead of fixed sleep
             try:
-                caption_box = WebDriverWait(self.driver, 5).until(
+                caption_box = WebDriverWait(self.driver, 3).until(  # Reduced from 5 to 3
                     EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
                 )
                 if caption:
@@ -506,7 +569,7 @@ class WhatsAppAutomation:
 
             for selector in send_selectors:
                 try:
-                    send_button = WebDriverWait(self.driver, 3).until(
+                    send_button = WebDriverWait(self.driver, 2).until(  # Reduced from 3 to 2
                         EC.element_to_be_clickable((By.XPATH, selector))
                     )
                     send_button.click()
@@ -520,7 +583,7 @@ class WhatsAppAutomation:
                 "//div[@title='Type a message']",
                 "//div[@role='textbox'][@title='Type a message']",
             ]
-            WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, message_input_selectors[0])))
+            WebDriverWait(self.driver, 3).until(EC.element_to_be_clickable((By.XPATH, message_input_selectors[0])))  # Reduced from 5 to 3
 
             print("Image sent successfully using attachment method")
             return True
@@ -542,11 +605,11 @@ class WhatsAppAutomation:
         
         for char in text:
             element.send_keys(char)
-            # Random typing delay between 0.05 and 0.2 seconds
-            time.sleep(random.uniform(0.05, 0.2))
+            # Random typing delay between 0.03 and 0.15 seconds (reduced from 0.05-0.2)
+            time.sleep(random.uniform(0.03, 0.15))
         
         # Random pause before sending (like a human thinking)
-        time.sleep(random.uniform(0.1, 0.5))
+        time.sleep(random.uniform(0.05, 0.3))  # Reduced from 0.1-0.5
 
     def _add_random_mouse_movements(self):
         """Add random mouse movements to appear more human"""
@@ -565,7 +628,7 @@ class WhatsAppAutomation:
             actions.move_by_offset(x, y).perform()
             
             # Small random delay
-            time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(random.uniform(0.05, 0.2))  # Reduced from 0.1-0.3
             
         except Exception:
             # Silently fail if mouse movement doesn't work
@@ -957,7 +1020,8 @@ class ModernFlyerGeneratorApp:
                 messagebox.showerror("Error", "The data file appears to be empty.")
                 return
 
-            total_count = 0
+            # Count valid contacts
+            valid_contacts = []
             for index, row in df.iterrows():
                 name = str(row['name']).strip()
                 phone = str(row['number']).strip()
@@ -965,16 +1029,52 @@ class ModernFlyerGeneratorApp:
                 if not name or name.lower() == 'nan' or not phone or phone.lower() == 'nan':
                     continue
                 
-                flyer_image = self._draw_flyer(name, phone)
-                if flyer_image:
-                    sanitized_name = re.sub(r'[^a-zA-Z0-9]', '', name)
-                    flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
-                    flyer_image.save(flyer_path)
-                    total_count += 1
+                valid_contacts.append((index, name, phone))
             
-            messagebox.showinfo("Success", f"Generated {total_count} flyers successfully!")
+            if not valid_contacts:
+                messagebox.showerror("Error", "No valid contacts found in the data file.")
+                return
+            
+            # Create and show progress modal
+            self.progress_modal = GenerationProgressModal(self.root, len(valid_contacts))
+            
+            # Generate flyers in a separate thread to keep UI responsive
+            def generate_thread():
+                total_count = 0
+                cancelled = False
+                
+                for index, name, phone in valid_contacts:
+                    if self.progress_modal.cancelled:
+                        cancelled = True
+                        break
+                    
+                    # Update progress in the UI thread
+                    self.root.after(0, lambda i=index, n=name: self.progress_modal.update_progress(i, n))
+                    
+                    flyer_image = self._draw_flyer(name, phone)
+                    if flyer_image:
+                        sanitized_name = re.sub(r'[^a-zA-Z0-9]', '', name)
+                        flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
+                        flyer_image.save(flyer_path)
+                        total_count += 1
+                
+                # Close the modal and show results in the UI thread
+                self.root.after(0, lambda: [
+                    self.progress_modal.destroy(),
+                    messagebox.showinfo(
+                        "Generation Complete", 
+                        f"Generated {total_count} flyers successfully!" if not cancelled 
+                        else f"Generation cancelled. {total_count} flyers were generated."
+                    ) if not cancelled or total_count > 0 else None
+                ])
+            
+            # Start the generation thread
+            thread = threading.Thread(target=generate_thread, daemon=True)
+            thread.start()
 
         except Exception as e:
+            if hasattr(self, 'progress_modal') and self.progress_modal:
+                self.progress_modal.destroy()
             messagebox.showerror("Error", f"Flyer generation failed: {e}")
 
     def _login_whatsapp(self):
@@ -1135,7 +1235,7 @@ class ModernFlyerGeneratorApp:
             print(f"✅ INSTANCE {instance.instance_id}: Chat opened successfully for {name} ({phone})")
             
             # VERIFICATION: Ensure we're in the right chat
-            time.sleep(1)  # Give time for chat to fully load
+            time.sleep(0.5)  # Reduced from 1 to 0.5
             
             # Double-check we have message input available
             message_input_available = False
@@ -1148,7 +1248,7 @@ class ModernFlyerGeneratorApp:
                 
                 for selector in message_input_selectors:
                     try:
-                        WebDriverWait(instance.driver, 3).until(
+                        WebDriverWait(instance.driver, 2).until(  # Reduced from 3 to 2
                             EC.element_to_be_clickable((By.XPATH, selector))
                         )
                         message_input_available = True
@@ -1172,7 +1272,7 @@ class ModernFlyerGeneratorApp:
                 
                 if not message_sent_successfully:
                     return False
-                time.sleep(1.5)  # Wait between message and image
+                time.sleep(1)  # Reduced from 1.5 to 1
             
             # Send image
             caption = ""
@@ -1182,7 +1282,7 @@ class ModernFlyerGeneratorApp:
             print(f"📤 INSTANCE {instance.instance_id}: Sending image...")
             if instance.send_image(flyer_path, caption):
                 print(f"✅ INSTANCE {instance.instance_id}: SUCCESS: Sent to {name} ({phone})")
-                time.sleep(2)  # Wait before next contact
+                time.sleep(1.5)  # Reduced from 2 to 1.5
                 return True
             else:
                 print(f"❌ INSTANCE {instance.instance_id}: Image failed for {name}")
@@ -1569,7 +1669,7 @@ class ModernFlyerGeneratorApp:
                 "top_right": {"name": (width-300, 100), "phone": (width-300, 140)},
                 "bottom_left": {"name": (50, height-80), "phone": (50, height-40)},
                 "bottom_right": {"name": (width-300, height-80), "phone": (width-300, height-40)},
-                "center": {"name": (width//2-100, height//2-20), "phone": (width//2-100, height//2+20)}
+                "center": {"name": (width//2100, height//2-20), "phone": (width//2-100, height//2+20)}
             }
             
             pos = positions.get(position, positions["bottom_left"])
@@ -1710,6 +1810,7 @@ def check_dependencies():
         'PIL': 'Pillow',
         'webdriver_manager': 'webdriver-manager',
         'pyperclip': 'pyperclip',
+        'matplotlib': 'matplotlib',
     }
     
     missing = []
@@ -1728,6 +1829,7 @@ def check_dependencies():
     
     return True
 
+
 def main():
     """Initialize and run the enhanced application."""
     if not check_dependencies():
@@ -1736,10 +1838,12 @@ def main():
     
     print("Starting Enhanced Flyer Generator with WhatsApp Automation...")
     print("Features: Coordinate positioning, text effects, custom messages/captions, faster processing")
-    print("Using 4 Chrome instances for parallel WhatsApp sending")  # Changed from 2 to 4
+    print("Using 4 Chrome instances for parallel WhatsApp sending")
+    print("Includes comprehensive analytics and reporting")
     
     app = ModernFlyerGeneratorApp()
     app.root.mainloop()
+
 
 if __name__ == "__main__":
     main()
