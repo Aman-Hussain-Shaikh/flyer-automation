@@ -2,7 +2,8 @@ import os
 import re
 import time
 import base64
-from typing import List, Tuple
+import random
+from typing import List, Tuple, Dict
 from pathlib import Path
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
@@ -16,17 +17,20 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 import threading
 import queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class WhatsAppAutomation:
-    """Handles WhatsApp Web automation using Selenium."""
+    """Handles WhatsApp Web automation using Selenium with multi-instance support."""
     
-    def __init__(self):
+    def __init__(self, instance_id=0):
         self.driver = None
         self.wait = None
         self.is_logged_in = False
+        self.instance_id = instance_id
         
     def setup_driver(self):
         """Initialize Chrome WebDriver with optimized options for faster performance."""
@@ -34,8 +38,8 @@ class WhatsAppAutomation:
             from webdriver_manager.chrome import ChromeDriverManager
             
             chrome_options = Options()
-            # User profile for persistent login
-            user_data_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "user_data")
+            # User profile for persistent login - unique for each instance
+            user_data_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), f"user_data_{self.instance_id}")
             chrome_options.add_argument(f"user-data-dir={user_data_dir}")
             
             # Performance optimizations
@@ -63,7 +67,7 @@ class WhatsAppAutomation:
             return True
             
         except Exception as e:
-            print(f"Error setting up Chrome driver: {e}")
+            print(f"Error setting up Chrome driver for instance {self.instance_id}: {e}")
             return False
             
     def login_to_whatsapp(self, callback=None):
@@ -76,7 +80,7 @@ class WhatsAppAutomation:
             self.driver.get("https://web.whatsapp.com")
             
             if callback:
-                callback("Please scan the QR code in your browser to login to WhatsApp Web...")
+                callback(f"Instance {self.instance_id}: Please scan the QR code in your browser to login to WhatsApp Web...")
             
             # Wait for login indicators
             login_selectors = [
@@ -94,19 +98,19 @@ class WhatsAppAutomation:
                         if element.is_displayed():
                             self.is_logged_in = True
                             if callback:
-                                callback("Successfully logged in to WhatsApp Web!")
+                                callback(f"Instance {self.instance_id}: Successfully logged in to WhatsApp Web!")
                             return True
                     except (NoSuchElementException, WebDriverException):
                         continue
                 time.sleep(2)
             
             if callback:
-                callback("Login timeout. Please try again.")
+                callback(f"Instance {self.instance_id}: Login timeout. Please try again.")
             return False
             
         except Exception as e:
             if callback:
-                callback(f"Error during WhatsApp login: {e}")
+                callback(f"Instance {self.instance_id}: Error during WhatsApp login: {e}")
             return False
 
     def open_chat_via_url(self, phone_number):
@@ -175,7 +179,7 @@ class WhatsAppAutomation:
             
             # INSTANT TYPING
             search_box.click()
-            search_box.send_keys(contact_name_or_number)
+            self._simulate_human_typing(search_box, contact_name_or_number)
             
             # MINIMAL wait for results - 0.5 seconds only
             time.sleep(0.5)  # Reduced from 1.5 to 0.5
@@ -246,7 +250,7 @@ class WhatsAppAutomation:
             message_box.click()  # Ensure focus
             time.sleep(0.1)  # Reduced from 0.3 to 0.1
             
-            message_box.send_keys(message)
+            self._simulate_human_typing(message_box, message)
             message_box.send_keys(Keys.ENTER)
             
             # Wait for message to be sent by checking for delivery indicators
@@ -490,7 +494,7 @@ class WhatsAppAutomation:
                     EC.element_to_be_clickable((By.XPATH, "//div[contains(@aria-placeholder, 'Add a caption')]"))
                 )
                 if caption:
-                    caption_box.send_keys(caption)
+                    self._simulate_human_typing(caption_box, caption)
             except (TimeoutException, NoSuchElementException):
                 print("Could not find caption box.")
 
@@ -531,6 +535,77 @@ class WhatsAppAutomation:
             self.driver.quit()
             self.driver = None
             self.is_logged_in = False
+    
+    def _simulate_human_typing(self, element, text):
+        """Simulate human typing patterns with random delays"""
+        import random
+        
+        for char in text:
+            element.send_keys(char)
+            # Random typing delay between 0.05 and 0.2 seconds
+            time.sleep(random.uniform(0.05, 0.2))
+        
+        # Random pause before sending (like a human thinking)
+        time.sleep(random.uniform(0.1, 0.5))
+
+    def _add_random_mouse_movements(self):
+        """Add random mouse movements to appear more human"""
+        try:
+            # Get window size
+            window_size = self.driver.get_window_size()
+            width = window_size['width']
+            height = window_size['height']
+            
+            # Generate random coordinates within the window
+            x = random.randint(0, width)
+            y = random.randint(0, height)
+            
+            # Create action chain for moving mouse
+            actions = ActionChains(self.driver)
+            actions.move_by_offset(x, y).perform()
+            
+            # Small random delay
+            time.sleep(random.uniform(0.1, 0.3))
+            
+        except Exception:
+            # Silently fail if mouse movement doesn't work
+            pass
+
+
+class WhatsAppAutomationManager:
+    """Manages multiple WhatsApp automation instances for parallel processing."""
+    
+    def __init__(self, num_instances=4):  # Changed from 2 to 4
+        self.num_instances = num_instances
+        self.instances = [WhatsAppAutomation(i) for i in range(num_instances)]
+        self.current_instance_index = 0
+        
+    def login_all_instances(self, callback=None):
+        """Login to all WhatsApp instances."""
+        def login_instance(instance):
+            return instance.login_to_whatsapp(callback)
+            
+        # Use ThreadPoolExecutor to login to all instances simultaneously
+        with ThreadPoolExecutor(max_workers=self.num_instances) as executor:
+            futures = [executor.submit(login_instance, instance) for instance in self.instances]
+            
+            results = []
+            for future in as_completed(futures):
+                results.append(future.result())
+                
+        return all(results)
+    
+    def get_next_instance(self):
+        """Get the next available instance in round-robin fashion."""
+        instance = self.instances[self.current_instance_index]
+        self.current_instance_index = (self.current_instance_index + 1) % self.num_instances
+        return instance
+    
+    def close_all(self):
+        """Close all browser instances."""
+        for instance in self.instances:
+            instance.close()
+
 
 class ModalProgress(ctk.CTkToplevel):
     """Custom modal window for displaying progress."""
@@ -539,7 +614,7 @@ class ModalProgress(ctk.CTkToplevel):
         self.title("Sending Flyers...")
         self.geometry("400x250")
         self.transient(master)  # Make modal
-        self.grab_set()         # Grab all events
+        self.grab_set()          # Grab all events
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.total_count = total_count
@@ -630,7 +705,6 @@ class ModernFlyerGeneratorApp:
         self.font_size = ctk.StringVar(value="36")
         self.text_color = ctk.StringVar(value="#000000")
         self.selected_font = ctk.StringVar()
-        self.selected_graphic = ctk.StringVar()
         
         # Enhanced WhatsApp variables
         self.whatsapp_message = ctk.StringVar(value="Hi {name}! Here's your personalized flyer.")
@@ -650,8 +724,9 @@ class ModernFlyerGeneratorApp:
         self.phone_x = ctk.StringVar(value="490")
         self.phone_y = ctk.StringVar(value="1970")
         
-        # WhatsApp automation
-        self.whatsapp_automation = WhatsAppAutomation()
+        # WhatsApp automation - now using multi-instance manager
+        self.whatsapp_manager = WhatsAppAutomationManager(num_instances=4)  # Changed from 2 to 4
+        self.whatsapp_automation = self.whatsapp_manager.instances[0]  # For backward compatibility
         
         # Store the original image size for coordinate calculation
         self.original_image_size = (0, 0)
@@ -661,11 +736,9 @@ class ModernFlyerGeneratorApp:
         # Define application folders
         self.BASE_DIR = Path(__file__).parent
         self.FONT_FOLDER = self.BASE_DIR / "fonts"
-        self.GRAPHICS_FOLDER = self.BASE_DIR / "graphics"
         
         # Create folders if they don't exist
         self.FONT_FOLDER.mkdir(exist_ok=True)
-        self.GRAPHICS_FOLDER.mkdir(exist_ok=True)
         
         # Load all font files
         self.font_options = []
@@ -688,7 +761,7 @@ class ModernFlyerGeneratorApp:
 
     def _on_closing(self):
         """Handle application closing."""
-        self.whatsapp_automation.close()
+        self.whatsapp_manager.close_all()
         self.root.destroy()
 
     def _load_background_image(self):
@@ -727,11 +800,6 @@ class ModernFlyerGeneratorApp:
         if color:
             self.shadow_color.set(color)
             self._update_preview()
-    
-    def _select_graphic(self, graphic_path):
-        """Sets the path for the selected graphic or icon."""
-        self.selected_graphic.set(str(graphic_path))
-        self._update_preview()
     
     def _on_resize(self, event):
         """Handles window resizing by updating the flyer preview."""
@@ -910,13 +978,13 @@ class ModernFlyerGeneratorApp:
             messagebox.showerror("Error", f"Flyer generation failed: {e}")
 
     def _login_whatsapp(self):
-        """Login to WhatsApp Web with improved error handling."""
+        """Login to all WhatsApp Web instances with improved error handling."""
         def login_callback(message):
             self.root.after(0, lambda: self.status_label.configure(text=message))
         
         def login_thread():
             try:
-                success = self.whatsapp_automation.login_to_whatsapp(login_callback)
+                success = self.whatsapp_manager.login_all_instances(login_callback)
                 
                 if success:
                     self.root.after(0, lambda: [
@@ -936,14 +1004,14 @@ class ModernFlyerGeneratorApp:
                 ])
         
         self.whatsapp_login_btn.configure(text="Connecting...", state="disabled")
-        self.status_label.configure(text="Opening WhatsApp Web...")
+        self.status_label.configure(text="Opening WhatsApp Web on multiple instances...")
         
         thread = threading.Thread(target=login_thread, daemon=True)
         thread.start()
         
     def _send_whatsapp_flyers(self):
-        """FIXED - WhatsApp flyer sending with improved contact switching."""
-        if not self.whatsapp_automation.is_logged_in:
+        """FIXED - WhatsApp flyer sending with multiple instances for parallel processing."""
+        if not any(instance.is_logged_in for instance in self.whatsapp_manager.instances):
             messagebox.showerror("Error", "Please login to WhatsApp first!")
             return
         
@@ -952,7 +1020,8 @@ class ModernFlyerGeneratorApp:
             return
 
         # Start the modal progress window
-        self.progress_modal = ModalProgress(self.root, len(self._get_valid_contacts()))
+        valid_contacts = self._get_valid_contacts()
+        self.progress_modal = ModalProgress(self.root, len(valid_contacts))
         
         def send_messages():
             start_time = time.time()
@@ -975,114 +1044,37 @@ class ModernFlyerGeneratorApp:
                 sent_count = 0
                 failed_contacts = []
                 
-                for index, row in df.iterrows():
-                    name = str(row['name']).strip()
-                    phone = str(row['number']).strip()
-                    
-                    if not name or name.lower() == 'nan' or not phone or phone.lower() == 'nan':
-                        continue
-                    
-                    # Update modal with current progress
-                    elapsed_time = time.time() - start_time
-                    self.root.after(0, lambda i=index, n=name, et=elapsed_time:
-                        self.progress_modal.update_progress(i, n, et))
-
-                    sanitized_name = re.sub(r'[^a-zA-Z0-9_\-]', '', name)
-                    flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
-                    
-                    if not os.path.exists(flyer_path):
-                        failed_contacts.append(f"{name} (flyer not found)")
-                        time.sleep(0.5)
-                        continue
-                    
-                    print(f"\n=== SWITCHING TO CONTACT: {name} ({phone}) ===")
-                    
-                    # === IMPROVED CONTACT SWITCHING ===
-                    chat_opened = False
-                    
-                    # Method 1: Search by phone number first
-                    print(f"🔍 SEARCHING by phone: {phone}")
-                    chat_opened = self.whatsapp_automation.search_and_open_chat(phone)
-                    
-                    # Method 2: If phone search fails, try name search  
-                    if not chat_opened:
-                        print(f"🔍 Phone failed, SEARCHING by name: {name}")
-                        chat_opened = self.whatsapp_automation.search_and_open_chat(name)
-                    
-                    # Method 3: If search fails, try direct URL method as last resort
-                    if not chat_opened:
-                        print(f"🔍 Search failed, trying URL method for: {phone}")
-                        # Clean the phone number (remove spaces, special chars)
-                        clean_phone = re.sub(r'[^\d+]', '', phone)
-                        if not clean_phone.startswith('+'):
-                            clean_phone = '+91' + clean_phone  # Assuming India, adjust as needed
-                        chat_opened = self.whatsapp_automation.open_chat_via_url(clean_phone)
-                    
-                    if chat_opened:
-                        print(f"✅ Chat opened successfully for {name} ({phone})")
+                # Use ThreadPoolExecutor to send messages in parallel using multiple instances
+                with ThreadPoolExecutor(max_workers=len(self.whatsapp_manager.instances)) as executor:
+                    # Create a list of futures for each contact
+                    futures = {}
+                    for index, row in df.iterrows():
+                        name = str(row['name']).strip()
+                        phone = str(row['number']).strip()
                         
-                        # VERIFICATION: Ensure we're in the right chat
-                        time.sleep(1)  # Give time for chat to fully load
-                        
-                        # Double-check we have message input available
-                        message_input_available = False
-                        try:
-                            message_input_selectors = [
-                                "//div[@contenteditable='true'][@data-tab='10']",
-                                "//div[@title='Type a message']",
-                                "//div[@role='textbox'][@title='Type a message']",
-                            ]
-                            
-                            for selector in message_input_selectors:
-                                try:
-                                    WebDriverWait(self.whatsapp_automation.driver, 3).until(
-                                        EC.element_to_be_clickable((By.XPATH, selector))
-                                    )
-                                    message_input_available = True
-                                    break
-                                except:
-                                    continue
-                                    
-                        except Exception as e:
-                            print(f"⚠️ Error checking message input: {e}")
-                        
-                        if not message_input_available:
-                            failed_contacts.append(f"{name} (chat not ready)")
-                            print(f"❌ Message input not available for {name}")
+                        if not name or name.lower() == 'nan' or not phone or phone.lower() == 'nan':
                             continue
                         
-                        # Send custom message first (if enabled)
-                        message_sent_successfully = True
-                        if self.use_custom_message.get():
-                            message = self.whatsapp_message.get().replace("{name}", name).replace("{phone}", phone)
-                            print(f"📝 Sending message...")
-                            message_sent_successfully = self.whatsapp_automation.send_message(message)
-                            
-                            if not message_sent_successfully:
-                                failed_contacts.append(f"{name} (message failed)")
-                                continue
-                            time.sleep(1.5)  # Wait between message and image
-                        
-                        # Send image
-                        caption = ""
-                        if self.use_custom_caption.get():
-                            caption = self.image_caption.get().replace("{name}", name).replace("{phone}", phone)
-                        
-                        print(f"📤 Sending image...")
-                        if self.whatsapp_automation.send_image(flyer_path, caption):
-                            sent_count += 1
-                            print(f"✅ SUCCESS: Sent to {name} ({phone})")
-                            time.sleep(2)  # Wait before next contact
-                        else:
-                            failed_contacts.append(f"{name} (image failed)")
-                            print(f"❌ Image failed for {name}")
-                            
-                    else:
-                        failed_contacts.append(f"{name} (contact not found)")
-                        print(f"❌ Could not find {name} ({phone}) with any method")
+                        # Submit the task to the executor
+                        future = executor.submit(self._send_single_flyer, index, name, phone)
+                        futures[future] = (index, name, phone)
                     
-                    print(f"--- Completed {name} ---\n")
-                    time.sleep(1)  # Brief pause between contacts
+                    # Process completed futures as they finish
+                    for future in as_completed(futures):
+                        index, name, phone = futures[future]
+                        try:
+                            success = future.result()
+                            if success:
+                                sent_count += 1
+                            else:
+                                failed_contacts.append(f"{name} (send failed)")
+                        except Exception as e:
+                            failed_contacts.append(f"{name} (error: {str(e)})")
+                        
+                        # Update progress
+                        elapsed_time = time.time() - start_time
+                        self.root.after(0, lambda i=index, n=name, et=elapsed_time:
+                            self.progress_modal.update_progress(i, n, et))
                 
                 total_time = time.time() - start_time
                 self.root.after(0, lambda: self.progress_modal.show_final_report(sent_count, failed_contacts, total_time))
@@ -1101,6 +1093,104 @@ class ModernFlyerGeneratorApp:
         self.whatsapp_send_btn.configure(text="Sending...", state="disabled")
         thread = threading.Thread(target=send_messages, daemon=True)
         thread.start()
+    
+    def _send_single_flyer(self, index, name, phone):
+        """Send a single flyer to a contact using the next available instance."""
+        # Get the next available WhatsApp instance
+        instance = self.whatsapp_manager.get_next_instance()
+        
+        if not instance.is_logged_in:
+            return False
+            
+        sanitized_name = re.sub(r'[^a-zA-Z0-9_\-]', '', name)
+        flyer_path = os.path.join(self.output_dir.get(), f"{sanitized_name}_flyer.png")
+        
+        if not os.path.exists(flyer_path):
+            return False
+        
+        print(f"\n=== INSTANCE {instance.instance_id}: SWITCHING TO CONTACT: {name} ({phone}) ===")
+        
+        # === IMPROVED CONTACT SWITCHING ===
+        chat_opened = False
+        
+        # Method 1: Search by phone number first
+        print(f"🔍 INSTANCE {instance.instance_id}: SEARCHING by phone: {phone}")
+        chat_opened = instance.search_and_open_chat(phone)
+        
+        # Method 2: If phone search fails, try name search  
+        if not chat_opened:
+            print(f"🔍 INSTANCE {instance.instance_id}: Phone failed, SEARCHING by name: {name}")
+            chat_opened = instance.search_and_open_chat(name)
+        
+        # Method 3: If search fails, try direct URL method as last resort
+        if not chat_opened:
+            print(f"🔍 INSTANCE {instance.instance_id}: Search failed, trying URL method for: {phone}")
+            # Clean the phone number (remove spaces, special chars)
+            clean_phone = re.sub(r'[^\d+]', '', phone)
+            if not clean_phone.startswith('+'):
+                clean_phone = '+91' + clean_phone  # Assuming India, adjust as needed
+            chat_opened = instance.open_chat_via_url(clean_phone)
+        
+        if chat_opened:
+            print(f"✅ INSTANCE {instance.instance_id}: Chat opened successfully for {name} ({phone})")
+            
+            # VERIFICATION: Ensure we're in the right chat
+            time.sleep(1)  # Give time for chat to fully load
+            
+            # Double-check we have message input available
+            message_input_available = False
+            try:
+                message_input_selectors = [
+                    "//div[@contenteditable='true'][@data-tab='10']",
+                    "//div[@title='Type a message']",
+                    "//div[@role='textbox'][@title='Type a message']",
+                ]
+                
+                for selector in message_input_selectors:
+                    try:
+                        WebDriverWait(instance.driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+                        message_input_available = True
+                        break
+                    except:
+                        continue
+                        
+            except Exception as e:
+                print(f"⚠️ INSTANCE {instance.instance_id}: Error checking message input: {e}")
+            
+            if not message_input_available:
+                print(f"❌ INSTANCE {instance.instance_id}: Message input not available for {name}")
+                return False
+            
+            # Send custom message first (if enabled)
+            message_sent_successfully = True
+            if self.use_custom_message.get():
+                message = self.whatsapp_message.get().replace("{name}", name).replace("{phone}", phone)
+                print(f"📝 INSTANCE {instance.instance_id}: Sending message...")
+                message_sent_successfully = instance.send_message(message)
+                
+                if not message_sent_successfully:
+                    return False
+                time.sleep(1.5)  # Wait between message and image
+            
+            # Send image
+            caption = ""
+            if self.use_custom_caption.get():
+                caption = self.image_caption.get().replace("{name}", name).replace("{phone}", phone)
+            
+            print(f"📤 INSTANCE {instance.instance_id}: Sending image...")
+            if instance.send_image(flyer_path, caption):
+                print(f"✅ INSTANCE {instance.instance_id}: SUCCESS: Sent to {name} ({phone})")
+                time.sleep(2)  # Wait before next contact
+                return True
+            else:
+                print(f"❌ INSTANCE {instance.instance_id}: Image failed for {name}")
+                return False
+                
+        else:
+            print(f"❌ INSTANCE {instance.instance_id}: Could not find {name} ({phone}) with any method")
+            return False
         
     def _get_valid_contacts(self):
         """Helper to get the number of valid contacts for the progress bar."""
@@ -1167,20 +1257,6 @@ class ModernFlyerGeneratorApp:
             self._apply_text_effects(draw, name, name_pos, font, text_color)
             self._apply_text_effects(draw, phone, phone_pos, font, text_color)
 
-            # Add graphic if selected
-            if self.selected_graphic.get() and os.path.exists(self.selected_graphic.get()):
-                try:
-                    graphic_image = Image.open(self.selected_graphic.get()).convert("RGBA")
-                    graphic_size = font_size  # Match font size
-                    graphic_resized = graphic_image.resize((graphic_size, graphic_size), Image.Resampling.LANCZOS)
-                    
-                    graphic_x = max(10, int(phone_x) - graphic_size - 5)
-                    graphic_y = max(10, int(phone_y) - graphic_size // 4)
-                    
-                    bg_image.paste(graphic_resized, (graphic_x, graphic_y), graphic_resized)
-                except Exception as e:
-                    print(f"Error adding graphic: {e}")
-            
             return bg_image
 
         except Exception as e:
@@ -1206,7 +1282,6 @@ class ModernFlyerGeneratorApp:
             ("Files", self._create_files_tab),
             ("Text Style", self._create_text_tab),
             ("Position", self._create_position_tab),
-            ("Graphics", self._create_graphics_tab),
             ("WhatsApp", self._create_whatsapp_tab)
         ]
 
@@ -1309,11 +1384,11 @@ class ModernFlyerGeneratorApp:
             entry.pack(side="left", expand=True, fill="x", padx=(0, 5))
             
             ctk.CTkButton(
-                entry_frame, 
-                text="Browse", 
-                command=command, 
-                width=80
-            ).pack(side="right")
+            entry_frame, 
+            text="Browse", 
+            command=command, 
+            width=80
+        ).pack(side="right")
 
     def _create_text_tab(self, master):
         """Enhanced text styling controls."""
@@ -1508,56 +1583,6 @@ class ModernFlyerGeneratorApp:
         except Exception as e:
             print(f"Error setting quick position: {e}")
 
-    def _create_graphics_tab(self, master):
-        """Sets up the controls for selecting graphics/icons."""
-        ctk.CTkLabel(master, text="Graphics/Icons", font=ctk.CTkFont(size=12, weight="bold")).pack(pady=10)
-        
-        graphics_files = []
-        for ext in ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.bmp']:
-            graphics_files.extend(list(self.GRAPHICS_FOLDER.glob(ext)))
-        
-        if graphics_files:
-            graphics_grid = ctk.CTkScrollableFrame(master, height=300)
-            graphics_grid.pack(fill="both", expand=True, padx=5, pady=5)
-
-            for i, graphic in enumerate(graphics_files):
-                try:
-                    img = ctk.CTkImage(
-                        Image.open(graphic).resize((60, 60)), 
-                        size=(60, 60)
-                    )
-                    
-                    graphic_frame = ctk.CTkFrame(graphics_grid, fg_color="transparent")
-                    graphic_frame.pack(pady=5, fill="x")
-                    
-                    btn = ctk.CTkButton(
-                        graphic_frame, 
-                        image=img, 
-                        text=graphic.stem[:15], 
-                        compound="left",
-                        command=lambda g=graphic: self._select_graphic(g),
-                        width=200,
-                        height=70
-                    )
-                    btn.pack(fill="x")
-                    
-                except Exception as e:
-                    print(f"Error loading graphic {graphic}: {e}")
-        else:
-            ctk.CTkLabel(
-                master, 
-                text="No graphics found.\nAdd images to the 'graphics' folder.",
-                text_color="gray"
-            ).pack(pady=20)
-        
-        ctk.CTkButton(
-            master,
-            text="Clear Graphic",
-            command=lambda: [self.selected_graphic.set(""), self._update_preview()],
-            fg_color="red",
-            hover_color="dark red"
-        ).pack(pady=10)
-
     def _create_whatsapp_tab(self, master):
         """Enhanced WhatsApp automation controls with on/off switches."""
         instructions = ctk.CTkTextbox(master, height=100, wrap="word")
@@ -1568,7 +1593,7 @@ class ModernFlyerGeneratorApp:
             "2. Generate flyers first\n"
             "3. Configure message/caption options below\n"
             "4. Send flyers automatically\n\n"
-            "Note: Faster processing, reduced delays for bulk sending."
+            "Note: Uses 4 Chrome instances for parallel sending. Faster processing, reduced delays for bulk sending."  # Changed from 2 to 4
         )
         instructions.configure(state="disabled")
 
@@ -1643,7 +1668,7 @@ class ModernFlyerGeneratorApp:
         
         ctk.CTkLabel(
             speed_frame,
-            text="Speed Optimizations Applied:\n• Reduced wait times\n• Parallel processing\n• Faster chat opening\n• Optimized image sending",
+            text="Speed Optimizations Applied:\n• 4 Chrome instances for parallel sending\n• Reduced wait times\n• Faster chat opening\n• Optimized image sending",  # Changed from 2 to 4
             text_color="#006600",
             justify="left"
         ).pack(pady=8)
@@ -1665,6 +1690,7 @@ class ModernFlyerGeneratorApp:
             self.message_textbox.configure(state="normal")
         else:
             self.message_textbox.configure(state="disabled")
+            self.whatsapp_message.set(self.message_textbox.get("0.0", "end-1c")) # Save the current value
 
     def _toggle_caption_controls(self):
         """Toggle custom caption controls on/off."""
@@ -1672,6 +1698,7 @@ class ModernFlyerGeneratorApp:
             self.caption_textbox.configure(state="normal")
         else:
             self.caption_textbox.configure(state="disabled")
+            self.image_caption.set(self.caption_textbox.get("0.0", "end-1c")) # Save the current value
 
 def check_dependencies():
     """Check if all required packages are installed."""
@@ -1709,6 +1736,7 @@ def main():
     
     print("Starting Enhanced Flyer Generator with WhatsApp Automation...")
     print("Features: Coordinate positioning, text effects, custom messages/captions, faster processing")
+    print("Using 4 Chrome instances for parallel WhatsApp sending")  # Changed from 2 to 4
     
     app = ModernFlyerGeneratorApp()
     app.root.mainloop()
